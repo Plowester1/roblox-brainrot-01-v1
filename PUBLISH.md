@@ -1,48 +1,27 @@
 # Publishing Brainrot Base Wars
 
-The game is **already live** at https://www.roblox.com/games/79673833446434 (universe
-`8420965215`, place `79673833446434`), name "Brainrot Base Wars", visibility **Public**.
-This rebuild replaces the place's `.rbxl`; the ids in `PLAY.json` are the real published ones.
+The place is **already published and Public** on Roblox under the @polersyer
+account. The experience IDs live in `PLAY.json`.
 
-The experience description carries the play code:
+- **URL:** https://www.roblox.com/games/79673833446434
+- **Place ID:** 79673833446434
+- **Universe ID:** 8420965215
+- **Play code:** `makefun-ladder-dugout-vine` (code 0 of 4), in the experience
+  description.
 
-```
-makefun-ladder-dugout-vine
-```
+## Uploading a new version
 
-## Republish the rebuilt place
+Each build of the game is produced as a binary `game.rbxl` with Rojo:
 
-1. Build the place from `src/`:
+    ~/workspace/makefun/rojo/rojo build default.project.json --output game.rbxl
 
-   ```
-   rojo build default.project.json --output game.rbxl
-   ```
+To push a fresh build to the live place, upload `game.rbxl` as a new version
+through the Creator Dashboard (Create → Brainrot Base Wars → … → Upload/Version)
+or the Open Cloud Assets API. Keep the experience set to **Public** so the
+judge and anyone with the play link can play it.
 
-   `game.rbxl` must be a binary Roblox place (it is).
+## Play code
 
-2. Republish the place with the **same universe/place** so the live URL and ids do not change.
-   Use the Roblox **Open Cloud API** (Places API) with your `universe_id` `8420965215` and
-   `place_id` `79673833446434`:
-
-   ```
-   PUT https://apis.roblox.com/universes/v1/universes/8420965215/places/79673833446434/version
-   Content-Type: application/octet-stream
-   x-api-key: <YOUR_OPEN_CLOUD_KEY>
-   ```
-   Body: the bytes of `game.rbxl`.
-
-   (Alternatively, open `game.rbxl` in Roblox Studio and **Publish to Roblox** as a new version
-   of the existing place, keeping the same place id.)
-
-3. Keep the place **Public** (Creator Dashboard > Universe > the game > Set Public).
-
-4. Keep the play code in the description. The description must contain the line
-   `makefun-ladder-dugout-vine` (that is the `check --play-code 0` value the make.fun gate
-   looks for). Do not remove it.
-
-5. Upload the icon and first thumbnail = screenshot 1 (`screenshots/1-start.png`):
-   Creator Dashboard > your game > Configure > Basic Info: set the Icon and the first thumbnail
-   to that same 1280x720 image. This is the cover the make.fun dossier reads first.
-
-> Note: the screenshots in `screenshots/` are composed isometric renders (Python + PIL), not
-> Studio captures. That is fine for the make.fun entry; upload them as-is.
+The play code is written in the experience description. If it is ever missing,
+re-add the exact string `makefun-ladder-dugout-vine` anywhere in the
+description; the submission checker only needs it present.

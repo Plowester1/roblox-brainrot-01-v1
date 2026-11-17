@@ -1,130 +1,151 @@
-#!/usr/bin/env node
-// render-screenshots.mjs (Node 24, stdlib only)
-// Headless, deterministic composer for the three Brainrot Base Wars screenshots.
-// These are COMPOSED isometric renders built with Python + PIL -- they are NOT
-// Roblox Studio captures (there is no Studio on this VM). Reads the same shared
-// brainrot data the game uses (src/shared/GameData.json), builds a deterministic
-// scene, and renders 1280x720 PNGs into screenshots/.
+// render-screenshots.mjs
+// Composed renders of Brainrot Base Wars for the make.fun screenshots badge.
+// Node 24 stdlib only. Reads the same brainrot data the game uses (GameData.json)
+// and renders 3 views (1280x720 PNG) via a small Python+PIL helper
+// (scripts/draw_scene.py). These are COMPOSED RENDERS, not Roblox Studio captures.
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
+const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
-const dataPath = join(root, 'src', 'shared', 'GameData.json');
 
-if (!existsSync(dataPath)) {
-  console.error('GameData.json not found:', dataPath);
-  process.exit(1);
-}
+// The brainrot data the game uses.
+const data = JSON.parse(readFileSync(join(root, 'src', 'shared', 'GameData.json'), 'utf8'));
+const tiers = data.tiers;
+const catalog = data.catalog;
+const order = data.tier_order;
 
-const data = JSON.parse(readFileSync(dataPath, 'utf8'));
-const game = data.game;
-const rarities = data.rarities;
-const brainrots = data.brainrots;
-
-// A stable (deterministic) selection of owned brainrots for the demo HUD.
-const owned = [0, 4, 9, 10, 13]; // indexes into brainrots
-
-const rarityColor = (name) => {
-  for (const r of rarities) if (r.name === name) return r.color;
-  return [180, 180, 180];
+// World layout, mirroring WorldBuilder.Luau.
+const LAYOUT = {
+  Arena: { x: 60, z: 130 },
+  ConveyorZStart: -42,
+  ConveyorZEnd: 42,
+  ConveyorWidth: 8,
+  PlayerBaseZ: 56,
+  RivalBaseZ: -56,
+  BasePlatform: { x: 26, y: 3, z: 14 },
 };
 
-// ----- deterministic scene geometry --------------------------------------
-// World layout matches the game: player base z=-44, rival base z=+44, conveyor z=0.
-const boxes = [];
-const labels = [];
+function nameFor(tier, idx) {
+  const pool = catalog.filter((e) => e.tier === tier);
+  return pool[idx % pool.length].name;
+}
+const tierColor = (t) => (tiers[t] ? tiers[t].color : [255, 255, 255]);
 
-// Ground is drawn by the Python side. Base platforms:
-boxes.push({ pos: [0, 0, -44], size: [44, 3, 16], color: [46, 120, 210], view: 1 });
-boxes.push({ pos: [0, 0, 44], size: [44, 3, 16], color: [200, 60, 60], view: 1 });
-// Conveyor:
-boxes.push({ pos: [0, 0, 0], size: [10, 1, 80], color: [110, 112, 122], view: 1 });
-// Boundary walls:
-boxes.push({ pos: [0, 4, 52], size: [70, 6, 2], color: [70, 72, 88], view: 1 });
-boxes.push({ pos: [0, 4, -52], size: [70, 6, 2], color: [70, 72, 88], view: 1 });
-boxes.push({ pos: [34, 4, 0], size: [2, 6, 104], color: [70, 72, 88], view: 1 });
-boxes.push({ pos: [-34, 4, 0], size: [2, 6, 104], color: [70, 72, 88], view: 1 });
-
-// Pedestals (small cubes) for the player base row at z=-36.
-for (let i = 0; i < 6; i++) {
-  const x = (i - 2.5) * 3.4;
-  boxes.push({ pos: [x, 0, -36], size: [2.4, 5, 2.4], color: [70, 74, 90], view: 1 });
+const scene = (bg, proj, hud) => ({ bg, proj, hud, shapes: [] });
+function addBox(s, x, y, z, dx, dy, dz, color) {
+  s.shapes.push({ type: 'box', pos: [x, y, z], size: [dx, dy, dz], color: color });
+}
+function addText(s, x, y, z, text, color) {
+  s.shapes.push({ type: 'text', pos: [x, y, z], text, color: color || [255, 255, 255] });
 }
 
-// Owned brainrots standing on the player pedestals, with name/rarity/$s labels.
-const placedNames = new Set();
-let pedIdx = 0;
-for (const oi of owned) {
-  const b = brainrots[oi];
-  const col = b.color;
-  const x = (pedIdx - 2.5) * 3.4;
-  const z = -36;
-  boxes.push({ pos: [x, 0, z], size: [2.2, 3.4, 2.2], color: col, view: 1 });
-  boxes.push({ pos: [x, 3.4, z], size: [2.6, 3.6, 2.6], color: col, view: 1 });
-  const rc = rarityColor(b.rarity);
-  labels.push({ pos: [x, 7, z], text: b.name + ' [' + b.rarity + '] $' + b.income + '/s', color: [255, 255, 255], view: 1 });
-  labels.push({ pos: [x, 6, z], text: b.rarity, color: rc, view: 1 });
-  placedNames.add(b.name);
-  pedIdx++;
+// A brainrot character: a colored block + name/rarity/$/s label above.
+function addBrainrot(s, x, y, z, tier, name, mutation) {
+  const color = tierColor(tier);
+  addBox(s, x, y, z, 2, 2.2, 2, color);
+  const mult = mutation && data.mutations[mutation] ? data.mutations[mutation].mult : 1;
+  const dps = Math.round((tiers[tier] ? tiers[tier].base_money : 10) * mult);
+  const mutTag = mutation && mutation !== 'None' ? ` [${mutation}]` : '';
+  addText(s, x, y + 2.6, z, `${name}${mutTag}\n${tier}  $${dps}/s`, [255, 255, 255]);
 }
 
-// A couple of brainrots wandering the conveyor for scene 1.
-boxes.push({ pos: [0, 0, -14], size: [2.4, 3.4, 2.4], color: brainrots[1].color, view: 1 });
-boxes.push({ pos: [0, 0, -2], size: [2.4, 3.4, 2.4], color: brainrots[5].color, view: 1 });
-boxes.push({ pos: [0, 0, 12], size: [2.4, 3.4, 2.4], color: brainrots[3].color, view: 1 });
-labels.push({ pos: [0, 6, -14], text: brainrots[1].name, color: [255, 255, 255], view: 1 });
-labels.push({ pos: [0, 6, -2], text: brainrots[5].name, color: [255, 255, 255], view: 1 });
-labels.push({ pos: [0, 6, 12], text: brainrots[3].name, color: [255, 255, 255], view: 1 });
-
-// Scene 2: a tight crop of the player base row (bigger, more readable labels).
-for (let i = 0; i < 4; i++) {
-  const oi = owned[i];
-  const b = brainrots[oi];
-  const x = (i - 1.5) * 10;
-  boxes.push({ pos: [x, 0, -36], size: [2.4, 5, 2.4], color: [70, 74, 90], view: 2 });
-  boxes.push({ pos: [x, 0, -36], size: [2.2, 3.4, 2.2], color: b.color, view: 2 });
-  boxes.push({ pos: [x, 3.4, -36], size: [2.6, 3.6, 2.6], color: b.color, view: 2 });
-  const rc = rarityColor(b.rarity);
-  labels.push({ pos: [x, 7, -36], text: b.name + ' [' + b.rarity + '] $' + b.income + '/s', color: [255, 255, 255], view: 2 });
-  labels.push({ pos: [x, 0, -36], text: b.rarity, color: rc, view: 2 });
+// --- Common HUD for the 3D views ----------------------------------------
+function defaultHud(banner) {
+  return {
+    panel: { x: 16, y: 16, w: 240, h: 140 },
+    title: 'BRAINROT BASE WARS',
+    cash: '$240',
+    income: '$14/s',
+    rebirth: 'Rebirths: 0 (x1.0)',
+    banner: banner || null,
+    buttons: [
+      { text: 'LOCK', color: [220, 80, 90], w: 120 },
+      { text: 'SHOP', color: [90, 140, 220], w: 110 },
+      { text: 'COLLECTION', color: [150, 100, 220], w: 130 },
+    ],
+  };
 }
 
-const scene = {
-  scale: 4.2,
-  origin: [640, 400],
-  boxes,
-  labels,
-  hud: {
-    cash: '$1,240',
-    income: '$62/s x1.0',
-    title: 'Rebirth 0 - Noob',
-  },
-  rarities: rarities.map((r) => ({
-    name: r.name,
-    color: r.color,
-    brainrots: brainrots.filter((b) => b.rarity === r.name).map((b) => ({
-      name: b.name,
-      income: b.income,
-      owned: placedNames.has(b.name),
-    })),
-  })),
-};
-
-const scenePath = join(root, '.scene.tmp.json');
-writeFileSync(scenePath, JSON.stringify(scene));
-
-const drawPath = join(root, 'scripts', 'draw_scene.py');
-const res = spawnSync('python3', [drawPath, scenePath], { encoding: 'utf8' });
-if (res.error) {
-  console.error('Failed to run python3:', res.error.message);
-  process.exit(1);
+// --- Scene 1: wide arena view --------------------------------------------
+function buildArena() {
+  const s = scene([140, 190, 235], { scale: 4.2, cx: 640, cy: 470, view: 1 }, defaultHud());
+  // Arena floor + conveyor + both bases.
+  addBox(s, 0, 0, 0, LAYOUT.Arena.x, 1, LAYOUT.Arena.z, [96, 150, 78]);
+  const convLen = Math.abs(LAYOUT.ConveyorZEnd - LAYOUT.ConveyorZStart) + 12;
+  addBox(s, 0, 1, 0, LAYOUT.ConveyorWidth, 0.8, convLen, [70, 70, 78]);
+  addBox(s, 0, 1.5, LAYOUT.PlayerBaseZ, LAYOUT.BasePlatform.x, 3, LAYOUT.BasePlatform.z, [84, 130, 200]);
+  addBox(s, 0, 1.5, LAYOUT.RivalBaseZ, LAYOUT.BasePlatform.x, 3, LAYOUT.BasePlatform.z, [180, 80, 90]);
+  // Trees.
+  for (const [tx, tz] of [[-22, 40], [22, -40], [-24, -45], [24, 45]]) {
+    addBox(s, tx, 2, tz, 4, 3, 4, [52, 130, 60]);
+  }
+  // Brainrots on the conveyor.
+  addBrainrot(s, -1.5, 2, -24, 'Rare', nameFor('Rare', 0), 'None');
+  addBrainrot(s, 1.5, 2, 4, 'Common', nameFor('Common', 0), 'Golden');
+  addBrainrot(s, -1.5, 2, 22, 'Epic', nameFor('Epic', 0), 'None');
+  // Brainrots on the player base pedestals.
+  addBrainrot(s, -4.5, 4.8, LAYOUT.PlayerBaseZ + 2.5, 'Common', nameFor('Common', 1), 'None');
+  addBrainrot(s, -1.5, 4.8, LAYOUT.PlayerBaseZ + 2.5, 'Rare', nameFor('Rare', 1), 'Diamond');
+  addBrainrot(s, 1.5, 4.8, LAYOUT.PlayerBaseZ + 2.5, 'Legendary', nameFor('Legendary', 0), 'None');
+  return s;
 }
-if (res.status !== 0) {
-  console.error(res.stdout, res.stderr);
-  process.exit(res.status);
+
+// --- Scene 2: player base close-up ---------------------------------------
+function buildBase() {
+  const s = scene([150, 195, 240], { scale: 8, cx: 640, cy: 430, view: 1.3, ox: 0, oz: LAYOUT.PlayerBaseZ }, defaultHud());
+  addBox(s, 0, 0, 0, 30, 1, 26, [96, 150, 78]);
+  addBox(s, 0, 1.5, 0, LAYOUT.BasePlatform.x, 3, LAYOUT.BasePlatform.z, [84, 130, 200]);
+  // Pedestals with brainrots (two rows).
+  const rows = [
+    [[-4.5, 2.5, 'Common', 1], [-1.5, 2.5, 'Rare', 1], [1.5, 2.5, 'Epic', 0], [4.5, 2.5, 'Mythic', 0]],
+    [[-4.5, -2.5, 'Rare', 2], [-1.5, -2.5, 'Legendary', 1], [1.5, -2.5, 'Common', 0], [4.5, -2.5, 'Brainrot God', 0]],
+  ];
+  for (const row of rows) {
+    for (const [x, z, tier, idx] of row) {
+      addBox(s, x, 3.4, z, 2.2, 0.4, 2.2, [220, 220, 230]);
+      const mutation = tier === 'Rare' ? 'Golden' : 'None';
+      addBrainrot(s, x, 4.6, z, tier, nameFor(tier, idx), mutation);
+    }
+  }
+  return s;
 }
-console.log('Screenshots rendered into screenshots/.');
+
+// --- Scene 3: HUD + collection / rarity ladder ---------------------------
+function buildHud() {
+  const s = scene([24, 28, 36], { scale: 0, cx: 0, cy: 0, view: 0 }, defaultHud());
+  // Rarity ladder rows.
+  let yy = 230;
+  for (const tier of order) {
+    const color = tierColor(tier);
+    addText(s, 0, 0, 0, `${tier}: collected`, color);
+    yy += 40;
+  }
+  return s;
+}
+
+// --- Render ---------------------------------------------------------------
+const scenes = [
+  { file: '1-arena.png', build: buildArena },
+  { file: '2-base.png', build: buildBase },
+  { file: '3-hud.png', build: buildHud },
+];
+
+mkdirSync(join(root, 'screenshots'), { recursive: true });
+
+for (const item of scenes) {
+  const s = item.build();
+  const tmp = join(here, '.scene.tmp.json');
+  writeFileSync(tmp, JSON.stringify(s));
+  const out = join(root, 'screenshots', item.file);
+  try {
+    execFileSync('python3', ['draw_scene.py', tmp, out], { cwd: here, stdio: 'inherit' });
+  } catch (e) {
+    console.error('failed to render', item.file, e.message);
+  }
+  writeFileSync(tmp, '');
+}
+console.log('render-screenshots done');

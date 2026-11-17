@@ -1,152 +1,114 @@
 -- Conveyor.luau
--- Spawns brainrots on the belt on a timer, walks them down the lane, and
--- despawns any that reach the end un-bought. Cleans up dead models.
-
-local Debris = game:GetService("Debris")
-local RunService = game:GetService("RunService")
-
-local BrainrotData = require(script.Parent.BrainrotData)
-local WorldBuilder = require(script.Parent.WorldBuilder)
+-- Spawns brainrots on the belt on a timer (weighted by rarity), moves them down
+-- the lane, and despawns them at the end if they are not bought.
 
 local Conveyor = {}
 
-local ACTIVE = {} -- id -> { model, head, income, alive, z, speed, def, rarity, mutation }
-local nextId = 0
-local spawnTimer = 0
-local beltLength = 80
-local beltSpeed = 4.5
-local spawnGap = 9
-local lastZ = beltLength / 2
-local onBuy = nil
+local BrainrotData = require(script.Parent.BrainrotData)
+local WorldBuilder = require(script.Parent.WorldBuilder)
+local GameState = require(script.Parent.GameState)
 
-Conveyor.ACTIVE = ACTIVE
+local RunService = game:GetService("RunService")
 
-local function newId()
-	nextId = nextId + 1
-	return "B" .. tostring(nextId)
-end
+-- The living conveyor brainrot models, keyed by the model itself.
+local active = {}
 
--- Place the model on the belt at the given z.
-local function place(model, z)
-	local pivot = CFrame.new(0, 1.8, z)
-	model:SetPrimaryPartCFrame(pivot)
-end
+local LAYOUT = WorldBuilder.Layout
 
--- Spawn a brainrot. def = { name, income, color }, rarity, mutation, speed.
-function Conveyor.spawn(def, rarity, mutation, speed)
-	local model, head = WorldBuilder.buildBrainrot(def.name, def.color, 2)
-	local id = newId()
-	local mut = mutation or "Normal"
-	local mult = BrainrotData.totalMutationMult(mut)
-	place(model, lastZ)
-	ACTIVE[id] = {
+-- Spawn a brainrot on the conveyor at the far (rival) end and let it walk toward
+-- the player base. Returns the model.
+function Conveyor.Spawn(owner, tier, forceMutation)
+	tier = tier or BrainrotData.PickTier()
+	local mutation = forceMutation or BrainrotData.PickMutation()
+	local name = BrainrotData.PickName(tier)
+	local entry = { name = name, tier = tier, baseMoney = BrainrotData.BuyCost(tier) }
+	local model = WorldBuilder.BuildBrainrot(entry, mutation)
+	model.Name = "Brainrot_" .. name
+	model.PrimaryPart = model:FindFirstChild("Body")
+	local startPos = Vector3.new(LAYOUT.ConveyorX, LAYOUT.ConveyorY + 1.1, LAYOUT.ConveyorZStart + 2)
+	model:SetPrimaryPartCFrame(CFrame.new(startPos))
+	model.Parent = workspace
+
+	local data = {
 		model = model,
-		head = head,
-		income = def.income * mult,
-		alive = true,
-		z = lastZ,
-		speed = speed or beltSpeed,
-		def = def,
-		rarity = rarity,
-		mutation = mut,
+		owner = owner,
+		entry = entry,
+		mutation = mutation,
+		z = startPos.Z,
+		walking = true,
 	}
-	model:SetAttribute("BrainrotId", id)
-	lastZ = lastZ - spawnGap
-	return id, ACTIVE[id]
+	active[model] = data
+	return model
 end
 
--- Remove a brainrot from the belt (bought, stolen, or despawned).
-function Conveyor.remove(id)
-	local entry = ACTIVE[id]
-	if not entry then
-		return
+-- Force-spawn an Epic+ brainrot during a Brainrot Rain event.
+function Conveyor.SpawnEvent(owner)
+	local tier = nil
+	local roll = math.random()
+	if roll < 0.5 then
+		tier = "Epic"
+	elseif roll < 0.8 then
+		tier = "Legendary"
+	elseif roll < 0.95 then
+		tier = "Mythic"
+	else
+		tier = "Brainrot God"
 	end
-	entry.alive = false
-	ACTIVE[id] = nil
-	if entry.model and entry.model.Parent then
-		entry.model:Destroy()
-	end
+	return Conveyor.Spawn(owner, tier, "None")
 end
 
--- Despawn any brainrot that walked past the end of the belt.
-local function despawnEnd()
-	local toRemove = {}
-	for id, e in pairs(ACTIVE) do
-		if e.alive and e.z < -beltLength / 2 - 4 then
-			table.insert(toRemove, id)
-		end
+-- Called by Shop when a player buys a conveyor brainrot; remove it from the lane.
+function Conveyor.Consume(model)
+	local data = active[model]
+	if not data then
+		return nil
 	end
-	for _, id in ipairs(toRemove) do
-		Conveyor.remove(id)
-	end
+	data.walking = false
+	active[model] = nil
+	return data
 end
 
--- Move brainrots down the lane each frame. Spreads the walking speed so the
--- gaps between spawns roughly hold (~spawnGap studs).
-local function moveBrainrots(dt)
-	for id, e in pairs(ACTIVE) do
-		if e.alive then
-			e.z = e.z - e.speed * dt
-			if e.model then
-				place(e.model, e.z)
+-- Move all conveyor brainrots toward the player base. Despawn those that reach
+-- the end without being bought.
+local function tick()
+	local step = 0.35
+	for model, data in pairs(active) do
+		if data.walking then
+			data.z = data.z + step
+			if model.PrimaryPart then
+				model:SetPrimaryPartCFrame(CFrame.new(LAYOUT.ConveyorX, LAYOUT.ConveyorY + 1.1, data.z))
+			end
+			if data.z >= LAYOUT.ConveyorZEnd then
+				data.walking = false
+				active[model] = nil
+				model:Destroy()
 			end
 		end
 	end
 end
 
--- Configure the conveyor (called once by init.server).
-function Conveyor.configure(opts)
-	if opts.beltLength then
-		beltLength = opts.beltLength
-		lastZ = beltLength / 2
-	end
-	if opts.speed then
-		beltSpeed = opts.speed
-	end
-	if opts.gap then
-		spawnGap = opts.gap
-	end
-	if opts.interval then
-		spawnInterval = opts.interval
-	end
-end
-
-local spawnInterval = 6.0
-local firstSpawnDone = false
-
--- Spawn one brainrot with a random rarity/mutation from the catalog.
-local function spawnRandom()
-	local roll = BrainrotData.rollSpawn()
-	if not roll.brainrot then
-		return
-	end
-	local def = roll.brainrot
-	Conveyor.spawn(def, roll.rarity, roll.mutation)
-end
-
--- Start the conveyor: a spawn timer plus the walk/despawn loop.
-function Conveyor.start()
-	spawnTimer = 0.5
-	RunService.Heartbeat:Connect(function(dt)
-		spawnTimer -= dt
-		if spawnTimer <= 0 then
-			spawnRandom()
-			spawnTimer = spawnInterval
+-- Every few seconds (scaled by the owner's conveyor speed upgrade) spawn a new
+-- brainrot on the belt.
+local function spawnLoop()
+	local acc = 0
+	while true do
+		local players = game:GetService("Players"):GetPlayers()
+		local owner = players[1]
+		local speed = owner and GameState.GetConveyorSpeed(owner) or 1
+		acc = acc + RunService.Heartbeat:Wait()
+		local interval = 6 / math.max(1, speed)
+		if acc >= interval then
+			acc = 0
+			if owner then
+				Conveyor.Spawn(owner)
+			end
 		end
-		moveBrainrots(dt)
-		despawnEnd()
-	end)
-end
-
--- Let the rival or shop register a callback when a brainrot is taken by id.
-function Conveyor.onTaken(fn)
-	Conveyor.takenHook = fn
-end
-
-function Conveyor.notifyTaken(id)
-	if Conveyor.takenHook then
-		Conveyor.takenHook(id)
 	end
+end
+
+function Conveyor.Start()
+	task.spawn(spawnLoop)
+	RunService.Heartbeat:Connect(tick)
 end
 
 return Conveyor

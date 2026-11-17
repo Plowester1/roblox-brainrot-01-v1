@@ -1,81 +1,78 @@
 -- Effects.luau
--- Lightweight client-side effects: particle bursts and simple sounds for buys,
--- steals, slaps, rebirths, and event fanfares.
+-- Simple particles / sounds for buys, steals, slaps, rebirths, and events.
+-- Kept light: a handful of Parts and ParticleEmitters.
 
 local Effects = {}
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
 
--- A short sound played through the SoundService.
-local function playSound(id, parent)
+-- A tiny one-shot particle burst at a world position with a given color.
+local function burst(position, color, count)
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Color = ColorSequence.new(color)
+	emitter.Size = NumberSequence.new(1.5)
+	emitter.Lifetime = NumberRange.new(0.5, 1)
+	emitter.Speed = NumberRange.new(5, 12)
+	emitter.EmissionDirection = Enum.NormalId.Top
+	emitter.SpreadAngle = Vector2.new(180, 180)
+	emitter.Rate = 0
+	local attachment = Instance.new("Attachment")
+	attachment.Position = position
+	attachment.Parent = workspace
+
+	emitter.Parent = attachment
+	emitter:Emit(count or 8)
+	task.delay(1.5, function()
+		emitter:Destroy()
+		attachment:Destroy()
+	end)
+end
+
+-- Play a short beep / pop sound.
+local function beep(id)
 	local sound = Instance.new("Sound")
 	sound.SoundId = id
-	sound.Volume = 0.6
-	sound.Parent = parent or SoundService
+	sound.Volume = 0.5
+	sound.Parent = SoundService
 	sound:Play()
-	sound.Ended:Connect(function()
+	task.delay(1.5, function()
 		sound:Destroy()
 	end)
 end
 
--- A quick colored particle burst at a position.
-local function burst(position, color, count)
-	local part = Instance.new("Part")
-	part.Anchored = true
-	part.CanCollide = false
-	part.Size = Vector3.new(1, 1, 1)
-	part.Transparency = 1
-	part.Parent = workspace
-	part.CFrame = CFrame.new(position)
-
-	local attach = Instance.new("Attachment")
-	attach.Position = Vector3.new(0, 0, 0)
-	attach.Parent = part
-
-	local particle = Instance.new("ParticleEmitter")
-	particle.Rate = 0
-	particle.Speed = NumberRange.new(3, 8)
-	particle.SpreadAngle = Vector2.new(360, 360)
-	particle.Lifetime = NumberRange.new(0.4, 0.8)
-	particle.Size = NumberSequence.new(0.5, 0)
-	particle.Color = ColorSequence.new(color)
-	particle.Parent = attach
-	particle:Emit(count or 10)
-
-	task.delay(1.5, function()
-		part:Destroy()
-	end)
+-- Confetti burst on a successful buy.
+function Effects.Buy(position)
+	burst(position, Color3.fromRGB(255, 220, 90), 14)
+	burst(position + Vector3.new(0, 1, 0), Color3.fromRGB(120, 255, 120), 8)
 end
 
-Effects.burst = burst
-
--- Played when a brainrot is bought.
-function Effects.buy(position, color)
-	burst(position, color, 12)
-	playSound("rbxassetid://91161262508")
+-- Golden / sparkle burst on a steal.
+function Effects.Steal(position)
+	burst(position, Color3.fromRGB(255, 200, 60), 12)
 end
 
--- Played when the rival is slapped.
-function Effects.slap(position)
-	burst(position, Color3.new(1, 1, 1), 16)
-	playSound("rbxassetid://91251675971")
+-- Knockback flash when the rival is slapped.
+function Effects.Slap(position)
+	burst(position, Color3.fromRGB(255, 80, 80), 20)
 end
 
--- Played on a rebirth.
-function Effects.rebirth(position)
-	for i = 1, 6 do
-		task.delay(i * 0.08, function()
-			burst(position + Vector3.new(math.random(-4, 4), math.random(0, 6), math.random(-4, 4)), Color3.new(1, 1, 0.4), 20)
-		end)
-	end
-	playSound("rbxassetid://91190725453")
+-- Grand rebirth blast.
+function Effects.Rebirth(position)
+	burst(position, Color3.fromRGB(200, 140, 255), 30)
+	burst(position + Vector3.new(0, 2, 0), Color3.fromRGB(255, 255, 120), 18)
 end
 
--- Event fanfare.
-function Effects.fanfare(position)
-	burst(position, Color3.new(0.4, 1, 0.8), 30)
-	playSound("rbxassetid://91227725074")
+-- Event fanfare: rainbow sparks across the conveyor.
+function Effects.Rain(position)
+	burst(position, Color3.fromRGB(120, 220, 255), 18)
+	burst(position + Vector3.new(0, 1, 0), Color3.fromRGB(255, 180, 255), 14)
+end
+
+-- Golden hour aura.
+function Effects.Golden(position)
+	burst(position, Color3.fromRGB(255, 215, 0), 24)
+	burst(position + Vector3.new(0, 2, 0), Color3.fromRGB(255, 240, 150), 16)
 end
 
 return Effects

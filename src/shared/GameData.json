@@ -1,68 +1,49 @@
 {
-  "game": {
-    "name": "Brainrot Base Wars",
-    "startCash": 100,
-    "incomeTick": 1.0,
-    "buyRadius": 6,
-    "carrySlow": 0.55,
-    "pedestalMax": 12,
-    "pedestalStart": 1,
-    "pedestalCostStep": 250,
-    "lockDuration": 30,
-    "lockCooldown": 60,
-    "rainEvery": 90,
-    "goldenEvery": 300,
-    "goldenDuration": 60,
-    "dropDespawn": 60,
-    "conveyorLength": 90,
-    "conveyorSpeed": 4.5,
-    "spawnInterval": 6.0,
-    "spawnGap": 9
+  "tier_order": [
+    "Common",
+    "Rare",
+    "Epic",
+    "Legendary",
+    "Mythic",
+    "Brainrot God",
+    "Secret"
+  ],
+  "tiers": {
+    "Common": { "rank": 1, "color": [176, 220, 160], "base_money": 2, "weight": 58 },
+    "Rare": { "rank": 2, "color": [120, 190, 255], "base_money": 6, "weight": 27 },
+    "Epic": { "rank": 3, "color": [190, 120, 255], "base_money": 15, "weight": 10 },
+    "Legendary": { "rank": 4, "color": [255, 200, 90], "base_money": 35, "weight": 5 },
+    "Mythic": { "rank": 5, "color": [255, 120, 190], "base_money": 80, "weight": 1.8 },
+    "Brainrot God": { "rank": 6, "color": [255, 220, 60], "base_money": 180, "weight": 0.35 },
+    "Secret": { "rank": 7, "color": [255, 80, 90], "base_money": 420, "weight": 0.06 }
   },
-  "mutations": [
-    { "name": "Normal", "mult": 1, "chance": 94.67 },
-    { "name": "Golden", "mult": 2, "chance": 4.0 },
-    { "name": "Diamond", "mult": 5, "chance": 1.0 },
-    { "name": "Rainbow", "mult": 10, "chance": 0.25 },
-    { "name": "Bloodrot", "mult": 25, "chance": 0.08 }
+  "catalog": [
+    { "name": "Frigo Camelo", "tier": "Common", "base_money": 2 },
+    { "name": "Giraffa Celeste", "tier": "Common", "base_money": 3 },
+    { "name": "Trippi Troppi", "tier": "Common", "base_money": 4 },
+    { "name": "Chimpanzini Bananini", "tier": "Rare", "base_money": 6 },
+    { "name": "Pot Hotspot", "tier": "Rare", "base_money": 7 },
+    { "name": "Cappuccino Assassino", "tier": "Rare", "base_money": 9 },
+    { "name": "Lirili Larila", "tier": "Epic", "base_money": 15 },
+    { "name": "Tralalero Tralala", "tier": "Epic", "base_money": 18 },
+    { "name": "Tung Tung Tung Sahur", "tier": "Legendary", "base_money": 35 },
+    { "name": "Bombardiro Crocodilo", "tier": "Legendary", "base_money": 42 },
+    { "name": "Ballerina Cappuccina", "tier": "Mythic", "base_money": 80 },
+    { "name": "La Vaca Saturno Saturnita", "tier": "Mythic", "base_money": 96 },
+    { "name": "Lirili Larila Supreme", "tier": "Brainrot God", "base_money": 180 },
+    { "name": "??? Sahur", "tier": "Secret", "base_money": 420 }
   ],
-  "rarities": [
-    { "name": "Common", "color": [185, 186, 199], "weight": 42 },
-    { "name": "Rare", "color": [96, 151, 235], "weight": 28 },
-    { "name": "Epic", "color": [166, 84, 224], "weight": 16 },
-    { "name": "Legendary", "color": [237, 172, 31], "weight": 8 },
-    { "name": "Mythic", "color": [224, 48, 94], "weight": 4.2 },
-    { "name": "Brainrot God", "color": [0, 227, 155], "weight": 2.0 },
-    { "name": "Secret", "color": [255, 190, 233], "weight": 0.3 }
-  ],
-  "brainrots": [
-    { "name": "Tung Tung Tung Sahur", "rarity": "Common", "income": 2, "color": [238, 130, 128] },
-    { "name": "Tralalero Tralala", "rarity": "Common", "income": 3, "color": [255, 190, 90] },
-    { "name": "Lirili Larila", "rarity": "Rare", "income": 6, "color": [150, 220, 180] },
-    { "name": "Ballerina Cappuccina", "rarity": "Rare", "income": 8, "color": [200, 180, 240] },
-    { "name": "Bombardiro Crocodilo", "rarity": "Epic", "income": 14, "color": [90, 200, 140] },
-    { "name": "Trippi Troppi", "rarity": "Epic", "income": 18, "color": [90, 190, 220] },
-    { "name": "Frigo Camelo", "rarity": "Legendary", "income": 32, "color": [170, 140, 110] },
-    { "name": "La Vaca Saturno Saturnita", "rarity": "Legendary", "income": 40, "color": [120, 90, 200] },
-    { "name": "Giraffa Celeste", "rarity": "Mythic", "income": 70, "color": [110, 200, 255] },
-    { "name": "Cappuccino Assassino", "rarity": "Mythic", "income": 85, "color": [160, 90, 200] },
-    { "name": "Pot Hotspot", "rarity": "Brainrot God", "income": 150, "color": [60, 220, 160] },
-    { "name": "Chimpanzini Bananini", "rarity": "Brainrot God", "income": 175, "color": [255, 220, 60] },
-    { "name": "Il Grande Sognatore", "rarity": "Secret", "income": 500, "color": [255, 160, 220] },
-    { "name": "L'Ultimo Spaghetti Eterno", "rarity": "Secret", "income": 650, "color": [250, 210, 120] }
-  ],
-  "titles": [
-    "Noob",
-    "Connoisseur",
-    "Brainrot Enjoyer",
-    "Meme Sommelier",
-    "High-Quality Doodler",
-    "Certified Luncher",
-    "Peak Brainrot",
-    "Grand Archivist",
-    "Living Meme",
-    "Tung Tung Lord",
-    "Immortal Brainrot",
-    "The Final Brainrot"
-  ]
+  "mutations": {
+    "None": { "mult": 1, "color": [255, 255, 255], "label": "" },
+    "Golden": { "mult": 2, "color": [255, 215, 0], "label": "Golden" },
+    "Diamond": { "mult": 5, "color": [180, 240, 255], "label": "Diamond" },
+    "Rainbow": { "mult": 10, "color": [255, 140, 255], "label": "Rainbow" },
+    "Bloodrot": { "mult": 25, "color": [200, 40, 40], "label": "Bloodrot" }
+  },
+  "mutation_chance": {
+    "Golden": 0.06,
+    "Diamond": 0.025,
+    "Rainbow": 0.012,
+    "Bloodrot": 0.004
+  }
 }

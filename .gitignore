@@ -8,6 +8,9 @@ out2/
 # Node
 node_modules/
 
+# Logs
+*.log
+
 # OS / editor
 .DS_Store
 *.swp

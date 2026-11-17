@@ -1,74 +1,62 @@
 # Brainrot Base Wars
 
-A 3D Roblox game for the make.fun bounty "Make the best AI Roblox brainrot game" (bounty
-[roblox-brainrot-01](https://make.fun/bounty/roblox-brainrot-01), entry by
-[@polersyer](https://github.com/Plowester1)). A colorful arena where you collect absurd
-meme characters, earn money per second, and defend your base from a rival who steals.
+A 3D Roblox game for the make.fun competition **"Make the best AI Roblox brainrot
+game"** (FREE entry, $1,000 pot, 1st place $150). Account: **@polersyer**.
 
-[![make.fun &middot; roblox-brainrot-01](https://make.fun/badge/roblox-brainrot-01.svg)](https://make.fun/bounty/roblox-brainrot-01?utm_source=github&utm_medium=readme&utm_campaign=roblox-brainrot-01)
-[![rank](https://make.fun/badge/roblox-brainrot-01/Plowester1/roblox-brainrot-01-v1/rank.svg)](https://make.fun/bounty/roblox-brainrot-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=roblox-brainrot-01)
-[![reward](https://make.fun/badge/roblox-brainrot-01/Plowester1/roblox-brainrot-01-v1/reward.svg)](https://make.fun/bounty/roblox-brainrot-01?utm_source=github&utm_medium=readme&utm_campaign=roblox-brainrot-01)
+Collect absurd Italian-brainrot meme characters, earn money per second, and defend
+your base from a rival who steals your brainrots.
 
-It is published and live at <https://www.roblox.com/games/79673833446434> (universe
-`8420965215`, place `79673833446434`).
+## The game loop
 
-## The loop
-
-- 3D world: a raised platform base with pedestals on your side, a central conveyor belt,
-  and a rival base across the arena. Default Roblox third-person camera; **WASD** to move,
-  **Space** to jump. The on-screen HUD is only the interface — the game itself is the 3D world.
-- Brainrots spawn on the conveyor and walk down the lane. Walk up to one and press **E** to
-  buy it (it costs cash) and it hops onto a free pedestal on your base. Each one earns
-  **$/second**, shown in a floating label above it: name, rarity, income.
-- 7 rarity tiers, from Common to Secret, with absurd Italian-brainrot names (Tung Tung Tung
-  Sahur, Tralalero Tralala, Bombardiro Crocodilo, Ballerina Cappuccina, Chimpanzini Bananini,
-  La Vaca Saturno Saturnita, Cappuccino Assassino, Pot Hotspot...). Higher rarity = higher
-  income, rarer spawn (Brainrot God ~2%, Secret ~0.3%).
-- Mutations: Golden (x2 $/s), Diamond (x5), Rainbow (x10) and Bloodrot (x25) can spawn, shown
-  in the label and tinted on the model.
-- Tension: the rival NPC bot wanders the arena, targets your highest-income brainrot and
-  carries it back to its own base. Press **Q** to slap it (it drops what it carries), or press
-  **L** / the Lock button to lock your base for 30s (60s cooldown) so it cannot steal. You can
-  also steal from the rival's base — walk over, press **E** on its brainrot, carry it back.
-  Stealing always resolves cleanly (complete or cancel; never a soft-lock), and dropped
-  pickups despawn after 60s.
-- Rebirths: spend cash plus a set of brainrots to rebirth — resets cash and the base but grants
-  a permanent +50% income multiplier per rebirth (costs scale ~1.75x) and a new title.
-- Upgrades (Shop button): more pedestals (up to 12), a faster conveyor (more spawns), and a
-  bigger income multiplier. Costs round to the nearest $100.
-- Events every ~90s a **Brainrot Rain** drops an Epic+ brainrot on the belt with a fanfare;
-  every ~5 min a **Golden Hour** doubles all income for 60s. Both announce in the HUD banner.
+- A colorful **3D arena**: your raised base with pedestals on one side, the rival
+  base across the arena, and a central conveyor belt running between them.
+- **Brainrots** spawn on the conveyor and walk down the lane. Walk up to one and
+  press **E** to buy it (costs cash); it goes to a free pedestal on your base.
+- Each brainrot earns **$/second**, shown in a floating label above it: name,
+  rarity, $/s. There are **7 rarity tiers** — Common, Rare, Epic, Legendary,
+  Mythic, Brainrot God, Secret — with names like *Tung Tung Tung Sahur*,
+  *Tralalero Tralala*, *Bombardiro Crocodilo*, *Ballerina Cappuccina*.
+- **Mutations**: a brainrot can spawn **Golden** (x2 $/s), **Diamond** (x5),
+  **Rainbow** (x10), or **Bloodrot** (x25), shown in its label and tint.
+- **Tension**: an NPC rival bot wanders the arena and steals brainrots from your
+  base. Press **Q** to slap it (it drops what it carries), or press **L** to lock
+  your base for 30s (60s cooldown) so it cannot steal. You can also steal from
+  the rival base — but you move slower while carrying.
+- **Rebirths**: spend cash + your brainrots to rebirth, resetting the base but
+  granting a permanent +50% income multiplier per rebirth.
+- **Upgrades** (Shop button): more pedestals (up to 12), a faster conveyor, and a
+  bigger income multiplier.
+- **Events**: every ~90s a **Brainrot Rain** spawns an Epic+ brainrot; every
+  ~5 minutes **Golden Hour** doubles all income for 60s. Banners announce them.
 
 ## Controls
 
-- **WASD** / **Space**: move and jump (default Roblox).
-- **E**: buy a nearby belt brainrot, or steal one from the rival base.
-- **Q**: slap the rival (knock it back and make it drop its prize).
-- **L**: lock your base (30s, 60s cooldown).
-- HUD buttons: **Lock**, **Shop**, **Collection** (rarity ladder + what you own).
+- **WASD** — move, **Space** — jump (default third-person camera)
+- **E** — buy a brainrot / steal from the rival base
+- **Q** — slap the rival bot
+- **L** — lock your base (30s, 60s cooldown)
+- **HUD buttons** — Lock, Shop, Collection
 
-## Repository layout
+## Roblox place
 
-- `src/server/` — server scripts: `init.server.luau` (entry), `GameState.luau` (single source
-  of truth), `BrainrotData.luau` (the catalog), `WorldBuilder.luau` (3D world), `Conveyor.luau`,
-  `Rival.luau`, `Shop.luau`.
-- `src/client/` — client scripts: `Game.client.luau` (entry), `HUD.luau`, `Effects.luau`.
-- `src/shared/GameData.json` — the shared catalog (also read by the screenshot renderer).
-- `default.project.json` — Rojo project (build with `rojo build --output game.rbxl`).
-- `main.ts` — hands the entry in (Node 24, stdlib only).
-- `scripts/render-screenshots.mjs` + `scripts/draw_scene.py` — headless screenshot composer.
+Published and Public. See [`PUBLISH.md`](PUBLISH.md) for the place/universe IDs
+and how to upload a fresh `.rbxl` version.
 
 ## Screenshots
 
-The screenshots in `screenshots/` are **composed isometric renders** generated by
-`scripts/render-screenshots.mjs` (which builds a scene from the same `src/shared/GameData.json`
-the game uses and renders it with Python + PIL). They are **not** Roblox Studio captures — there
-is no Studio on this build VM. The first screenshot is also the game's thumbnail.
+> **Note:** the screenshots in `screenshots/` are **composed renders** generated
+> by a headless script (`scripts/render-screenshots.mjs`) — they are **not**
+> Roblox Studio captures. This Linux build has no Studio, so they are rendered
+> approximations of the game's world and HUD. The game itself is a real 3D Roblox
+> place.
 
-## Publishing
+## make.fun
 
-See [PUBLISH.md](PUBLISH.md) for republishing the rebuilt `.rbxl` (the game is already live).
+Built for the [make.fun bounty: make the best AI Roblox brainrot game](
+https://make.fun/bounty/roblox-brainrot-01). Three badges are claimed on the
+submission: the game link badge (this published Public place), the play-code
+badge, and the screenshots badge.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [`LICENSE`](LICENSE).
