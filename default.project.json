@@ -1,10 +1,30 @@
 {
-  "name": "house-dodge",
+  "name": "brainrot-base-wars",
   "tree": {
     "$className": "DataModel",
     "Players": {
       "$properties": {
-        "CharacterAutoLoads": false
+        // A 3D game needs characters: the starter set CharacterAutoLoads
+        // false (it was a 2D square), which would leave every player with
+        // no character and no way to walk the arena.
+        "CharacterAutoLoads": true
+      }
+    },
+    "ReplicatedStorage": {
+      "Shared": {
+        "$path": "src/shared"
+      },
+      "BrainrotRemotes": {
+        "$className": "Folder",
+        "BuyBrainrot": { "$className": "RemoteEvent" },
+        "StealBrainrot": { "$className": "RemoteEvent" },
+        "SlapRival": { "$className": "RemoteEvent" },
+        "LockBase": { "$className": "RemoteEvent" },
+        "Rebirth": { "$className": "RemoteEvent" },
+        "BuyUpgrade": { "$className": "RemoteEvent" },
+        // Server -> client only: state snapshots, toasts and event banners.
+        // The six remotes above are client -> server requests.
+        "StateUpdate": { "$className": "RemoteEvent" }
       }
     },
     "ServerScriptService": {
@@ -21,42 +41,34 @@
     },
     "Workspace": {
       "$properties": {
-        "FilteringEnabled": true
+        "FilteringEnabled": true,
+        // Gravity is a single float in modern Roblox (not a Vector3):
+        // the starter's [0, -196.2, 0] array failed Rojo's type check.
+        "Gravity": 196.2
       },
       "Baseplate": {
         "$className": "Part",
         "$properties": {
           "Anchored": true,
-          "Color": [
-            0.38823,
-            0.37254,
-            0.38823
-          ],
+          "Color": [0.20, 0.78, 0.48],
           "Locked": true,
-          "Position": [
-            0,
-            -10,
-            0
-          ],
-          "Size": [
-            512,
-            20,
-            512
-          ]
+          // Lowered: the old -0.5 put the baseplate's top face coplanar
+          // with WorldBuilder's 200x200 arena floor, causing z-fighting.
+          "Position": [0, -2, 0],
+          "Size": [160, 1, 160]
         }
       }
     },
     "Lighting": {
       "$properties": {
-        "Ambient": [
-          0,
-          0,
-          0
-        ],
-        "Brightness": 2,
+        "Ambient": [0.35, 0.40, 0.52],
+        "Brightness": 2.5,
+        "ClockTime": 14,
         "GlobalShadows": true,
         "Outlines": false,
-        "Technology": "Voxel"
+        "Technology": "Voxel",
+        "EnvironmentDiffuseScale": 0.6,
+        "EnvironmentSpecularScale": 0.5
       }
     },
     "SoundService": {

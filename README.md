@@ -19,9 +19,21 @@ A colorful 3D arena with your base (raised platform with pedestals), a central c
 - **Events:** every ~90s a Brainrot Rain spawns a rare (Epic+) brainrot; every ~5 min a Golden Hour doubles all income for 60s.
 - **HUD (ScreenGui only):** cash, income/sec, rebirth count + multiplier, Lock + Shop + Collection buttons, event banner.
 
+## Controls
+
+| Key / button | What it does |
+|---|---|
+| WASD + Space | Move / jump (default Roblox third-person camera) |
+| **E** | Interact: buy the nearest brainrot on the conveyor, steal from the rival's base, or pick up a dropped brainrot |
+| **Q** (or click the rival) | Slap the rival — knocks it back and makes it drop what it carries |
+| **L** (or Lock button) | Lock your base for 30s (60s cooldown after it ends) |
+| **C** (or Collection button) | Open the collection / rarity ladder |
+| Shop button | Buy pedestals (up to 12), faster conveyor, income multiplier |
+| Rebirth button | Spend cash + brainrots for a permanent +50% income multiplier |
+
 ## Tech
 
-Luau, Rojo layout (`src/server` + `src/client`, `default.project.json`), built with Rojo 7.7.1 into `game.rbxl`. `main.ts` hands the game in and writes the dossier. See `PUBLISH.md` for the publishing steps (Studio, Public place, play code in the description, icon + thumbnail upload, fill in `PLAY.json`).
+Luau, Rojo layout (`src/server` + `src/client`, `default.project.json`), built with Rojo 7.7.1 into `game.rbxl`. `main.ts` hands the game in and writes the dossier. Server modules, one job each: `GameState` (single source of truth), `BrainrotData` (catalog + spawn weights), `WorldBuilder` (3D world + brainrot models), `Conveyor` (spawns + belt movement), `Rival` (NPC thief AI), `Shop` (validated RemoteEvent handlers), `init.server` (wiring, income loop, events). Client: `Game.client` (input + remotes), `HUD` (ScreenGui), `Effects` (particles + sounds). See `PUBLISH.md` for the publishing steps (Studio, Public place, play code in the description, icon + thumbnail upload, fill in `PLAY.json`).
 
 ## Screenshots
 
