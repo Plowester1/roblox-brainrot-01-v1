@@ -113,3 +113,16 @@ the coordinator does the GitHub push + submit.
   verified by reading + the checks above, not by running in Roblox.
 - .makefun/owner.json untouched (poler wallet FcdRcTG3QNRUFVqUm61wSxuxGQZ7jD1RpPhmZniY9fU7).
 - No secrets in the repo; no real-money spending.
+
+## Coordinator independent verification (2026-11-18 ~04:33 WIB, from disk)
+
+Verified independently (not the builder's word):
+1. Rojo build — OK; rebuilt game.rbxl BYTE-IDENTICAL to committed (38,637 B, binary).
+2. main.ts twice — dossier BYTE-IDENTICAL across my two runs (186,522 B; builder reported 186,527 B — 5 B difference, likely output-path; determinism holds within runs). Place: 30 instances, 11 scripts, 93.4% matched to src/ (10/11, bar 80%).
+3. makefun check — 4 pass (competition_open, snapshot 27 files / 328,399 B at edd3d6c, license_osi MIT, entrypoint), 1 FAIL play_link (EXPECTED — PLAY.json zeros, not published), 16 skip (transcripts run server-side).
+4. Screenshots — 3 PNGs 1280x720, 21,974 / 27,261 / 37,612 B, distinct sha256 (71a77c10 / 7a6932f6 / c1d0b3e5), all ≤256 KiB.
+5. Network calls in src/: 0. Rockstar/GTA/trademark strings: 0.
+6. README badges kept (3 badge images + 3 bounty links); honest "composed renders" note present.
+7. PLAY.json still zeros (not faked). owner.json untouched (poler wallet).
+8. Play-code check (--play-code 0) did not print the code in this kit run either (same as builder); code makefun-ladder-dugout-vine comes from the brief/API and is in PUBLISH.md.
+Recording 01a1eb59 sealed by the coordinator after this verification. This STATE.md note is the only change after edd3d6c; game files are unchanged from edd3d6c.
