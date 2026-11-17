@@ -1,9 +1,13 @@
 # Brainrot Base Wars
 
 A 3D Roblox game for the make.fun bounty "Make the best AI Roblox brainrot game" (bounty
-[roblox-brainrot-01](https://makefun.com/bounty/roblox-brainrot-01), entry by
+[roblox-brainrot-01](https://make.fun/bounty/roblox-brainrot-01), entry by
 [@polersyer](https://github.com/Plowester1)). A colorful arena where you collect absurd
 meme characters, earn money per second, and defend your base from a rival who steals.
+
+[![make.fun &middot; roblox-brainrot-01](https://make.fun/badge/roblox-brainrot-01.svg)](https://make.fun/bounty/roblox-brainrot-01?utm_source=github&utm_medium=readme&utm_campaign=roblox-brainrot-01)
+[![rank](https://make.fun/badge/roblox-brainrot-01/Plowester1/roblox-brainrot-01-v1/rank.svg)](https://make.fun/bounty/roblox-brainrot-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=roblox-brainrot-01)
+[![reward](https://make.fun/badge/roblox-brainrot-01/Plowester1/roblox-brainrot-01-v1/reward.svg)](https://make.fun/bounty/roblox-brainrot-01?utm_source=github&utm_medium=readme&utm_campaign=roblox-brainrot-01)
 
 It is published and live at <https://www.roblox.com/games/79673833446434> (universe
 `8420965215`, place `79673833446434`).
