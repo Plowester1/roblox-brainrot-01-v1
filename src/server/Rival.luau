@@ -1,318 +1,237 @@
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+-- Rival.luau
+-- The NPC rival bot. It wanders the arena and periodically tries to steal the
+-- player's highest-income brainrot, carrying it back to its own base. The
+-- player can slap it to make it drop what it carries. It respects the player's
+-- base lock.
 
-local BrainrotData = require(script.Parent.BrainrotData)
-local GameState = require(script.Parent.GameState)
+local Players = game:GetService("Players")
+
 local WorldBuilder = require(script.Parent.WorldBuilder)
+local GameState = require(script.Parent.GameState)
 
 local Rival = {}
-local phase = "Wander"
-local targetPlayer
-local targetModel
-local destination
-local nextDecisionAt = 0
-local walkPhase = 0
-local knockback = Vector3.zero
-local started = false
 
-local function now()
-	return os.clock()
+local BOT_NAME = "Rival"
+local model = nil
+local carrying = nil -- { id, ownerUserId, def, mutation, income }
+local targetId = nil
+local animState = "idle" -- idle | toPlayerBase | steal | toRivalBase
+local moveSpeed = 6
+local STATE = {}
+
+-- Where the bases are: set by init.server.
+Rival.playerBase = CFrame.new(0, 0, -40)
+Rival.rivalBase = CFrame.new(0, 0, 40)
+
+Rival.STATE = STATE
+Rival.carrying = nil
+Rival.model = nil
+
+-- Build the rival character (a big angry blocky bot).
+function Rival.build()
+	model = WorldBuilder.buildBrainrot(BOT_NAME, Color3.fromRGB(200, 40, 40), 3)
+	model:PivotTo(Rival.rivalBase * CFrame.new(0, 1.8, -6))
+	model:SetAttribute("IsRival", true)
+	Rival.model = model
+	Rival.carrying = carrying
+	return model
 end
 
-local function rivalPosition()
-	local model = WorldBuilder.GetRivalModel()
-	local root = model and model.PrimaryPart
-	return root and root.Position or Vector3.new(0, 3, 28)
-end
-
-local function findFreeRivalSlot()
-	local occupied = {}
-	for _, owned in ipairs(GameState.GetRivalOwned()) do
-		occupied[owned.slot] = true
-	end
-	for slot = 1, #BrainrotData.World.rivalSlots do
-		if not occupied[slot] then
-			return slot
+-- Pick the player's highest-income brainrot currently on a pedestal.
+local function pickHighestIncome()
+	local best = nil
+	local bestId = nil
+	for _, p in ipairs(Players:GetPlayers()) do
+		local userId = p.UserId
+		local state = GameState.get(userId)
+		if state then
+			GameState.forEachOwned(userId, function(id, owner)
+				local income = Rival.incomeOf and Rival.incomeOf(id) or 0
+				if not best or income > best then
+					best = income
+					bestId = id
+				end
+			end)
 		end
 	end
-	return nil
+	return bestId
 end
 
-local function chooseWanderDestination()
-	local points = {
-		Vector3.new(-28, 3, 18), Vector3.new(28, 3, 18), Vector3.new(-28, 3, -18),
-		Vector3.new(28, 3, -18), Vector3.new(0, 3, 0), Vector3.new(-38, 3, 48),
-		Vector3.new(38, 3, -48),
-	}
-	return points[math.random(1, #points)]
+Rival.pickHighestIncome = pickHighestIncome
+Rival.STATE = STATE
+
+-- Register the caller-provided hooks: incomeOf(id), takeFromPlayer(id, userId),
+-- onKept(id), and a way to know whether the player base is locked.
+function Rival.registerHooks(hooks)
+	Rival.incomeOf = hooks.incomeOf
+	Rival.takeFromPlayer = hooks.takeFromPlayer
+	Rival.onKept = hooks.onKept
+	Rival.isLocked = hooks.isLocked
 end
 
-local function chooseVictim()
-	local candidates = {}
-	for _, player in ipairs(Players:GetPlayers()) do
-		local state = GameState.Get(player)
-		if state and #state.owned > 0 and not GameState.IsLocked(player) then
-			table.insert(candidates, player)
-		end
-	end
-	if #candidates == 0 then
-		return
-	end
-	targetPlayer = candidates[math.random(1, #candidates)]
-	local owned = targetPlayer and GameState.Get(targetPlayer).owned
-	if not owned or #owned == 0 then
-		targetPlayer = nil
-		return
-	end
-	-- The rival hunts the highest-income brainrot, not a random one:
-	-- protecting your best earner (lock / slap) is now a real decision
-	-- instead of the rival mostly grabbing a cheap Common.
-	local record = owned[1]
-	for _, candidate in ipairs(owned) do
-		if (candidate.income or 0) > (record.income or 0) then
-			record = candidate
-		end
-	end
-	targetModel = record.model
-	if targetModel and targetModel.PrimaryPart then
-		destination = targetModel.PrimaryPart.Position
-		phase = "Hunt"
-		nextDecisionAt = now() + 12
-	else
-		targetPlayer = nil
-		targetModel = nil
-		phase = "Wander"
-	end
-end
-
-local function animateWalk(model, deltaTime)
-	walkPhase += deltaTime * 10
-	local swing = math.sin(walkPhase)
-	local root = model.PrimaryPart
-	if not root then
-		return
-	end
-	-- Set absolute limb angles from the root's current CFrame each frame.
-	-- The old code multiplied each limb's CFrame by a rotation every frame,
-	-- so the swing accumulated and the legs spun round instead of swinging.
-	-- Each limb swings around its hip/shoulder: translate up to the joint,
-	-- rotate, translate back down.
-	local function swingLimb(limb, offset, angle)
-		if not limb then
-			return
-		end
-		local rest = root.CFrame * CFrame.new(offset.X, offset.Y, offset.Z)
-		limb.CFrame = rest * CFrame.new(0, limb.Size.Y / 2, 0)
-			* CFrame.Angles(angle, 0, 0)
-			* CFrame.new(0, -limb.Size.Y / 2, 0)
-	end
-	swingLimb(model:FindFirstChild("RivalLeftLeg"), Vector3.new(-0.8, -1, 0), swing * 0.45)
-	swingLimb(model:FindFirstChild("RivalRightLeg"), Vector3.new(0.8, -1, 0), -swing * 0.45)
-	swingLimb(model:FindFirstChild("RivalLeftArm"), Vector3.new(-2, 3.3, 0), -swing * 0.35)
-	swingLimb(model:FindFirstChild("RivalRightArm"), Vector3.new(2, 3.3, 0), swing * 0.35)
-end
-
-local function moveToward(model, target, speed, deltaTime)
-	local root = model and model.PrimaryPart
-	if not root then
+-- Move the rival toward a target CFrame. Returns true when close enough.
+local function walkToward(target, dt, stopDist)
+	local c = model:GetPivot()
+	local dir = target.Position - c.Position
+	local dist = dir.Magnitude
+	if dist < stopDist then
 		return true
 	end
-	local offset = target - root.Position
-	offset = Vector3.new(offset.X, 0, offset.Z)
-	local distance = offset.Magnitude
-	if distance < 0.5 then
-		return true
-	end
-	local direction = offset.Unit
-	local step = math.min(speed * deltaTime, distance)
-	local nextPosition = root.Position + direction * step
-	model:PivotTo(CFrame.lookAt(nextPosition, nextPosition + direction))
-	animateWalk(model, deltaTime)
-	return distance <= step + 0.5
+	local step = dir.Unit * (moveSpeed * dt)
+	model:PivotTo(c * CFrame.new(step))
+	return false
 end
 
-local function seedRivalBase()
-	if #GameState.GetRivalOwned() > 0 then
+-- The carried brainrot model sits on the rival's head.
+local carriedModel = nil
+local carriedAdornee = nil
+
+-- Lift the picked brainrot model up onto the rival.
+local function liftCarried(id, def, mutation)
+	if not def then
 		return
 	end
-	local seeds = {"tralalero", "lirili", "trippi"}
-	for slot, id in ipairs(seeds) do
-		local brainrot = BrainrotData.GetBrainrot(id)
-		local model = WorldBuilder.CreateBrainrot(brainrot, "None", "RivalOwned")
-		local record = {
-			id = id,
-			mutation = "None",
-			slot = slot,
-			model = model,
-			income = BrainrotData.GetEffectiveIncome(brainrot, "None"),
-		}
-		GameState.AddRivalOwned(record)
-		WorldBuilder.PlaceOnRivalPedestal(model, slot)
-	end
+	carriedModel, carriedAdornee = WorldBuilder.buildBrainrot(def.name, def.color, 1.6)
+	carriedModel.Parent = model
+	local offset = CFrame.new(0, 5.5, 0)
+	local c = model:GetPivot()
+	carriedModel:PivotTo(c * offset)
+	carrying = { id = id, def = def, mutation = mutation, income = def.income * GameState.getMultiplier(0) or def.income }
+	Rival.carrying = carrying
+	STATE.carrying = true
 end
 
-local function tryStealTarget()
-	if not targetPlayer or not targetModel then
+-- Attempt a steal: choose the highest-income brainrot and transition to the
+-- "toPlayerBase" state. Returns true when a steal started.
+local function attemptSteal()
+	local id = pickHighestIncome()
+	if not id then
 		return false
 	end
-	if GameState.IsLocked(targetPlayer) then
-		targetPlayer = nil
-		targetModel = nil
-		phase = "Wander"
-		return false
-	end
-	local record = GameState.RemoveOwned(targetPlayer, targetModel)
-	if not record then
-		targetPlayer = nil
-		targetModel = nil
-		phase = "Wander"
-		return false
-	end
-	record.model:SetAttribute("Kind", "RivalCarried")
-	WorldBuilder.UpdateLabel(record.model, "Carried")
-	GameState.SetRivalCarrying(record)
-	targetPlayer = nil
-	targetModel = nil
-	phase = "Carry"
+	targetId = id
+	animState = "toPlayerBase"
 	return true
 end
 
-local function completeRivalSteal()
-	local rival = GameState.GetRival()
-	local record = rival.carrying
-	local slot = findFreeRivalSlot()
-	if not record then
-		phase = "Wander"
-		nextDecisionAt = now() + 4
+-- Complete the theft: remove the brainrot from the player, lift it, and head
+-- back to the rival base. Every steal path ends cleanly here.
+local function doTheft()
+	if not targetId then
+		animState = "idle"
 		return
 	end
-	if not slot then
-		-- Rival base full: the old code just returned and the rival stayed
-		-- in Carry phase forever, hugging its base with a stolen brainrot.
-		-- Drop it as a pickup in front of the rival base instead so a
-		-- player can grab it back.
-		local dropAt = BrainrotData.World.rivalBase + Vector3.new(0, 1, 12)
-		if record.model then
-			record.model:Destroy()
-		end
-		WorldBuilder.CreateDropped(record, dropAt)
-		GameState.ClearRivalCarrying()
-		phase = "Wander"
-		nextDecisionAt = now() + 4
+	local entry = Rival.incomeOf and Rival.incomeOf(targetId)
+	if not entry then
+		targetId = nil
+		animState = "idle"
 		return
 	end
-	record.slot = slot
-	GameState.AddRivalOwned(record)
-	GameState.ClearRivalCarrying()
-	WorldBuilder.PlaceOnRivalPedestal(record.model, slot)
-	phase = "Wander"
-	nextDecisionAt = now() + 4
+	local owner = GameState.ownerOf(targetId)
+	if owner and Rival.takeFromPlayer then
+		Rival.takeFromPlayer(targetId, owner)
+	end
+	liftCarried(targetId, entry.def, entry.mutation)
+	targetId = nil
+	animState = "toRivalBase"
 end
 
-function Rival.Start()
-	if started then
+-- The rival reached its base with a carried brainrot: keep it (despawns).
+local function keepCarried()
+	if carrying and Rival.onKept then
+		Rival.onKept(carrying.id)
+	end
+	if carriedModel then
+		carriedModel:Destroy()
+	end
+	carriedModel = nil
+	carrying = nil
+	Rival.carrying = nil
+	STATE.carrying = false
+	animState = "idle"
+end
+
+-- Slap the rival: knock it back and make it drop what it carries.
+function Rival.slap(fromPosition, force)
+	local c = model:GetPivot()
+	local away = (c.Position - fromPosition).Unit * (force or 6)
+	model:PivotTo(c * CFrame.new(away))
+	if carrying then
+		if carriedModel then
+			carriedModel:Destroy()
+		end
+		carriedModel = nil
+		carrying = nil
+		Rival.carrying = nil
+		STATE.carrying = false
+		animState = "idle"
+	end
+	return true
+end
+
+local stealTimer = 0
+local thinkTimer = 0
+local STEAL_INTERVAL = 9
+local THINK_INTERVAL = 3
+
+-- Advance the rival's AI: decide whether to start a steal.
+local function think(dt)
+	thinkTimer -= dt
+	stealTimer -= dt
+	if thinkTimer > 0 then
 		return
 	end
-	started = true
-	WorldBuilder.BuildRival()
-	WorldBuilder.InitializeRivalPedestals()
-	seedRivalBase()
-	destination = chooseWanderDestination()
-	RunService.Heartbeat:Connect(function(deltaTime)
-		local model = WorldBuilder.GetRivalModel()
-		if not model or not model.PrimaryPart then
-			return
-		end
-		local rival = GameState.GetRival()
-		if now() < rival.stunnedUntil then
-			if knockback.Magnitude > 0.01 then
-				local nextPosition = model.PrimaryPart.Position + knockback * deltaTime
-				model:PivotTo(CFrame.new(nextPosition))
-				knockback = knockback * 0.93
-			end
-			return
-		end
-		if phase == "Wander" then
-			local reached = destination and moveToward(model, destination, 11, deltaTime)
-			if reached or now() >= nextDecisionAt then
-				chooseVictim()
-				if phase == "Wander" then
-					destination = chooseWanderDestination()
-					nextDecisionAt = now() + 3
-				end
-			end
-		elseif phase == "Hunt" then
-			if not targetPlayer or not targetModel or not targetModel.Parent then
-				targetPlayer = nil
-				targetModel = nil
-				phase = "Wander"
-				destination = chooseWanderDestination()
-			elseif GameState.IsLocked(targetPlayer) then
-				targetPlayer = nil
-				targetModel = nil
-				phase = "Wander"
-				destination = chooseWanderDestination()
-			else
-				local targetPosition = targetModel.PrimaryPart and targetModel.PrimaryPart.Position
-				if targetPosition and moveToward(model, targetPosition, 13, deltaTime) then
-					tryStealTarget()
-				end
-			end
-		elseif phase == "Carry" then
-			local record = rival.carrying
-			if record and record.model then
-				record.model:PivotTo(model.PrimaryPart.CFrame * CFrame.new(0, 2, -3.5))
-			end
-			local basePosition = BrainrotData.World.rivalBase + Vector3.new(0, 1, 9)
-			if moveToward(model, basePosition, 12, deltaTime) then
-				completeRivalSteal()
+	thinkTimer = THINK_INTERVAL
+
+	if animState == "idle" then
+		-- Only start a steal when the player base is not locked.
+		local locked = Rival.isLocked and Rival.isLocked() or false
+		if not locked and stealTimer <= 0 and not carrying then
+			if attemptSteal() then
+				stealTimer = STEAL_INTERVAL
 			end
 		end
-	end)
+	end
 end
 
-function Rival.Slap(player)
-	local rival = GameState.GetRival()
-	if now() < rival.slapCooldownUntil then
-		return false, "Rival is still recovering"
-	end
-	local model = WorldBuilder.GetRivalModel()
-	if not model or not model.PrimaryPart then
-		return false, "Rival not ready"
-	end
-	local dropPosition
-	local record = rival.carrying
-	if record then
-		dropPosition = model.PrimaryPart.Position + Vector3.new(0, 0.3, 0)
-		if record.model then
-			record.model:Destroy()
+-- Drive the walk states each frame.
+local function update(dt)
+	think(dt)
+	if animState == "toPlayerBase" then
+		local arrive = walkToward(Rival.playerBase, dt, 4)
+		if arrive then
+			doTheft()
 		end
-		WorldBuilder.CreateDropped(record, dropPosition)
-		GameState.ClearRivalCarrying()
-	end
-	local playerRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-	if playerRoot then
-		local away = model.PrimaryPart.Position - playerRoot.Position
-		away = Vector3.new(away.X, 0, away.Z)
-		if away.Magnitude > 0 then
-			knockback = away.Unit * 28
+	elseif animState == "toRivalBase" then
+		local arrive = walkToward(Rival.rivalBase, dt, 4)
+		if arrive then
+			keepCarried()
 		end
 	end
-	rival.stunnedUntil = now() + 1.5
-	rival.slapCooldownUntil = now() + 2
-	phase = "Wander"
-	targetPlayer = nil
-	targetModel = nil
-	destination = chooseWanderDestination()
-	return true, dropPosition
 end
 
-function Rival.GetDistanceTo(player)
-	local model = WorldBuilder.GetRivalModel()
-	local root = model and model.PrimaryPart
-	local playerRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-	if not root or not playerRoot then
-		return math.huge
+local isRunning = false
+
+-- Start the rival's AI loop.
+function Rival.start()
+	if isRunning then
+		return
 	end
-	return (root.Position - playerRoot.Position).Magnitude
+	isRunning = true
+	game:GetService("RunService").Heartbeat:Connect(update)
 end
+
+function Rival.setState(s)
+	animState = s
+end
+
+Rival.reset = function()
+	carrying = nil
+	Rival.carrying = nil
+	STATE.carrying = false
+	animState = "idle"
+	if model then
+		model:PivotTo(Rival.rivalBase * CFrame.new(0, 1.8, -6))
+	end
+end
+
+return Rival

@@ -1,158 +1,152 @@
+-- Conveyor.luau
+-- Spawns brainrots on the belt on a timer, walks them down the lane, and
+-- despawns any that reach the end un-bought. Cleans up dead models.
+
+local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService")
 
 local BrainrotData = require(script.Parent.BrainrotData)
 local WorldBuilder = require(script.Parent.WorldBuilder)
 
 local Conveyor = {}
-local spawned = {}
-local running = false
-local heartbeatConnection = nil
 
-local function fastestConveyorLevel()
-	local fastest = 0
-	for _, state in pairs(require(script.Parent.GameState).GetAll()) do
-		fastest = math.max(fastest, state.conveyorLevel)
-	end
-	return fastest
+local ACTIVE = {} -- id -> { model, head, income, alive, z, speed, def, rarity, mutation }
+local nextId = 0
+local spawnTimer = 0
+local beltLength = 80
+local beltSpeed = 4.5
+local spawnGap = 9
+local lastZ = beltLength / 2
+local onBuy = nil
+
+Conveyor.ACTIVE = ACTIVE
+
+local function newId()
+	nextId = nextId + 1
+	return "B" .. tostring(nextId)
 end
 
-local function getSpeed()
-	return BrainrotData.World.conveyorSpeed + fastestConveyorLevel() * 0.65
+-- Place the model on the belt at the given z.
+local function place(model, z)
+	local pivot = CFrame.new(0, 1.8, z)
+	model:SetPrimaryPartCFrame(pivot)
 end
 
-local function getSpawnInterval()
-	return math.max(2.1, 5.2 - fastestConveyorLevel() * 0.62)
+-- Spawn a brainrot. def = { name, income, color }, rarity, mutation, speed.
+function Conveyor.spawn(def, rarity, mutation, speed)
+	local model, head = WorldBuilder.buildBrainrot(def.name, def.color, 2)
+	local id = newId()
+	local mut = mutation or "Normal"
+	local mult = BrainrotData.totalMutationMult(mut)
+	place(model, lastZ)
+	ACTIVE[id] = {
+		model = model,
+		head = head,
+		income = def.income * mult,
+		alive = true,
+		z = lastZ,
+		speed = speed or beltSpeed,
+		def = def,
+		rarity = rarity,
+		mutation = mut,
+	}
+	model:SetAttribute("BrainrotId", id)
+	lastZ = lastZ - spawnGap
+	return id, ACTIVE[id]
 end
 
-local function removeFromList(model)
-	for index, item in ipairs(spawned) do
-		if item == model then
-			table.remove(spawned, index)
-			return true
-		end
-	end
-	return false
-end
-
-local function spawnBrainrot(minimumRarityIndex, forcedMutation)
-	local brainrot = BrainrotData.ChooseBrainrot(minimumRarityIndex)
-	local mutation = forcedMutation or BrainrotData.ChooseMutation().name
-	local model = WorldBuilder.CreateBrainrot(brainrot, mutation, "Conveyor")
-	local lane = BrainrotData.World.conveyorStart
-	-- Spread spawns across most of the 12-wide belt (was a 4.8-stud
-	-- cluster in the middle, so the belt always looked the same).
-	local x = lane.X + math.random() * 9 - 4.5
-	model:PivotTo(CFrame.new(x, lane.Y, lane.Z))
-	model:SetAttribute("WalkPhase", math.random() * math.pi * 2)
-	table.insert(spawned, model)
-	return model
-end
-
-function Conveyor.Spawn(minimumRarityIndex, forcedMutation)
-	return spawnBrainrot(minimumRarityIndex or 1, forcedMutation)
-end
-
-function Conveyor.GetSpawned()
-	return spawned
-end
-
-function Conveyor.IsSpawned(model)
-	for _, item in ipairs(spawned) do
-		if item == model then
-			return true
-		end
-	end
-	return false
-end
-
-function Conveyor.Take(model)
-	if not Conveyor.IsSpawned(model) then
-		return false
-	end
-	removeFromList(model)
-	return true
-end
-
-function Conveyor.Remove(model)
-	removeFromList(model)
-	if model then
-		model:Destroy()
-	end
-end
-
-function Conveyor.FindNear(position, radius)
-	local nearest
-	local nearestDistance = radius
-	for _, model in ipairs(spawned) do
-		local root = model.PrimaryPart
-		if root then
-			local distance = (root.Position - position).Magnitude
-			if distance <= nearestDistance then
-				nearest = model
-				nearestDistance = distance
-			end
-		end
-	end
-	return nearest
-end
-
-function Conveyor.Start()
-	if running then
+-- Remove a brainrot from the belt (bought, stolen, or despawned).
+function Conveyor.remove(id)
+	local entry = ACTIVE[id]
+	if not entry then
 		return
 	end
-	running = true
-	local lane = BrainrotData.World.conveyorStart
-	local laneEnd = BrainrotData.World.conveyorEnd
-	task.spawn(function()
-		while running do
-			task.wait(getSpawnInterval())
-			if running then
-				spawnBrainrot(1)
+	entry.alive = false
+	ACTIVE[id] = nil
+	if entry.model and entry.model.Parent then
+		entry.model:Destroy()
+	end
+end
+
+-- Despawn any brainrot that walked past the end of the belt.
+local function despawnEnd()
+	local toRemove = {}
+	for id, e in pairs(ACTIVE) do
+		if e.alive and e.z < -beltLength / 2 - 4 then
+			table.insert(toRemove, id)
+		end
+	end
+	for _, id in ipairs(toRemove) do
+		Conveyor.remove(id)
+	end
+end
+
+-- Move brainrots down the lane each frame. Spreads the walking speed so the
+-- gaps between spawns roughly hold (~spawnGap studs).
+local function moveBrainrots(dt)
+	for id, e in pairs(ACTIVE) do
+		if e.alive then
+			e.z = e.z - e.speed * dt
+			if e.model then
+				place(e.model, e.z)
 			end
 		end
-	end)
-	-- The Heartbeat connection is stored so Stop() can disconnect it. The old
-	-- code never disconnected: Start() after Stop() connected a second
-	-- Heartbeat and every brainrot then moved at double speed.
-	heartbeatConnection = RunService.Heartbeat:Connect(function(deltaTime)
-		if not running then
-			return
+	end
+end
+
+-- Configure the conveyor (called once by init.server).
+function Conveyor.configure(opts)
+	if opts.beltLength then
+		beltLength = opts.beltLength
+		lastZ = beltLength / 2
+	end
+	if opts.speed then
+		beltSpeed = opts.speed
+	end
+	if opts.gap then
+		spawnGap = opts.gap
+	end
+	if opts.interval then
+		spawnInterval = opts.interval
+	end
+end
+
+local spawnInterval = 6.0
+local firstSpawnDone = false
+
+-- Spawn one brainrot with a random rarity/mutation from the catalog.
+local function spawnRandom()
+	local roll = BrainrotData.rollSpawn()
+	if not roll.brainrot then
+		return
+	end
+	local def = roll.brainrot
+	Conveyor.spawn(def, roll.rarity, roll.mutation)
+end
+
+-- Start the conveyor: a spawn timer plus the walk/despawn loop.
+function Conveyor.start()
+	spawnTimer = 0.5
+	RunService.Heartbeat:Connect(function(dt)
+		spawnTimer -= dt
+		if spawnTimer <= 0 then
+			spawnRandom()
+			spawnTimer = spawnInterval
 		end
-		local speed = getSpeed()
-		for index = #spawned, 1, -1 do
-			local model = spawned[index]
-			local root = model.PrimaryPart
-			if root then
-				local phase = (model:GetAttribute("WalkPhase") or 0) + deltaTime * 10
-				model:SetAttribute("WalkPhase", phase)
-				local nextZ = root.Position.Z + speed * deltaTime
-				if nextZ >= laneEnd.Z then
-					removeFromList(model)
-					model:Destroy()
-				else
-					local bob = math.abs(math.sin(phase)) * 0.08
-					model:PivotTo(CFrame.new(root.Position.X, lane.Y + bob, nextZ) * CFrame.Angles(0, math.rad(180), 0))
-				end
-			else
-				-- PrimaryPart gone (model destroyed out from under us):
-				-- drop it from the list instead of tracking a dead model.
-				removeFromList(model)
-				model:Destroy()
-			end
-		end
+		moveBrainrots(dt)
+		despawnEnd()
 	end)
 end
 
-function Conveyor.Stop()
-	running = false
-	if heartbeatConnection then
-		heartbeatConnection:Disconnect()
-		heartbeatConnection = nil
+-- Let the rival or shop register a callback when a brainrot is taken by id.
+function Conveyor.onTaken(fn)
+	Conveyor.takenHook = fn
+end
+
+function Conveyor.notifyTaken(id)
+	if Conveyor.takenHook then
+		Conveyor.takenHook(id)
 	end
-	for _, model in ipairs(spawned) do
-		model:Destroy()
-	end
-	table.clear(spawned)
 end
 
 return Conveyor

@@ -1,443 +1,259 @@
--- HUD: the ScreenGui. The game itself is 3D; this module is ONLY the
--- interface over it: cash/income/rebirth stats, Lock/Shop/Collection/
--- Rebirth buttons, the event banner, toasts, the E-prompt and the
--- Collection + Shop panels. It never touches gameplay state directly:
--- Game.client feeds it server snapshots through SetState, and button clicks
--- fire the remotes the server validates.
--- NOTE: Roblox's own menu buttons cover the top-left corner, so the top
--- bar's stats start at x=210 and nothing important sits top-left.
+-- HUD.luau
+-- Builds the on-screen HUD (cash, income, rebirth, lock/shop/collection buttons,
+-- and the event banner). The HUD is only the interface overlay: the game itself
+-- is 3D. This module exposes functions the client script calls.
 
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local player = Players.LocalPlayer
 local HUD = {}
 
-local state = nil
-local remotes = nil
-local gui = nil
-local labels = {}
-local panels = {}
-local rows = {}
-local rowPrices = {}
+local gui
+local cashLabel, incomeLabel, rebirthLabel, banner, lockButton, lockText
+local shopButton, collectionButton, collectionFrame
+local lastBannerText = ""
 
-local function formatMoney(amount)
-	local text = tostring(math.floor(amount or 0))
-	local reversed = text:reverse():gsub("(%d%d%d)", "%1,")
-	return "$" .. reversed:reverse():gsub("^,", "")
+local function label(name, size, color, pos, parent, text)
+	local l = Instance.new("TextLabel")
+	l.Name = name
+	l.Size = size
+	l.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+	l.BackgroundTransparency = 0.2
+	l.BorderSizePixel = 0
+	l.TextColor3 = color
+	l.Font = Enum.Font.SourceSansBold
+	l.TextSize = 22
+	l.Text = text
+	l.Position = pos
+	l.Parent = parent
+	return l
 end
 
-local function makeLabel(parent, name, position, size, textSize, color, font)
-	local label = Instance.new("TextLabel")
-	label.Name = name
-	label.Position = position
-	label.Size = size
-	label.BackgroundTransparency = 1
-	label.Text = ""
-	label.TextColor3 = color or Color3.fromRGB(240, 242, 255)
-	label.TextSize = textSize
-	label.Font = font or Enum.Font.GothamBold
-	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.Parent = parent
-	return label
-end
+-- Build the full HUD into a ScreenGui. Returns a table of named elements.
+function HUD.build(screenGui)
+	gui = screenGui
 
-local function makeButton(parent, name, position, size, text, color)
-	local button = Instance.new("TextButton")
-	button.Name = name
-	button.Position = position
-	button.Size = size
-	button.BackgroundColor3 = color
-	button.BorderSizePixel = 0
-	button.Text = text
-	button.TextColor3 = Color3.fromRGB(255, 255, 255)
-	button.TextSize = 14
-	button.Font = Enum.Font.GothamBlack
-	button.AutoButtonColor = true
-	button.Parent = parent
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
-	corner.Parent = button
-	return button
-end
+	local top = Instance.new("Frame")
+	top.Name = "TopBar"
+	top.Size = UDim2.new(0.5, 0, 0, 70)
+	top.Position = UDim2.new(0.5, 0, 0, 12)
+	top.AnchorPoint = Vector2.new(0.5, 0)
+	top.BackgroundColor3 = Color3.fromRGB(16, 16, 26)
+	top.BackgroundTransparency = 0.25
+	top.BorderSizePixel = 0
+	top.Parent = gui
 
-local function makePanel(parent, name, position, size)
-	local frame = Instance.new("Frame")
-	frame.Name = name
-	frame.Position = position
-	frame.Size = size
-	frame.BackgroundColor3 = Color3.fromRGB(22, 26, 51)
-	frame.BorderSizePixel = 0
-	frame.Visible = false
-	frame.Parent = parent
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 14)
-	corner.Parent = frame
-	return frame
-end
+	cashLabel = label("Cash", UDim2.fromScale(0.33, 0.5), Color3.fromRGB(120, 255, 120), UDim2.fromScale(0, 0), top, "$0")
+	cashLabel.BackgroundTransparency = 1
+	cashLabel.TextScaled = false
+	cashLabel.TextSize = 26
 
--- GameData.json (ReplicatedStorage.Shared) as a ModuleScript via Rojo.
--- Guarded: if the JSON transform is ever unavailable, the collection
--- panel falls back to the rarity ladder alone.
-local gameData = nil
-pcall(function()
-	gameData = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("GameData"))
-end)
+	incomeLabel = label("Income", UDim2.fromScale(0.33, 0.5), Color3.fromRGB(255, 230, 120), UDim2.fromScale(0.33, 0), top, "$0/s")
+	incomeLabel.BackgroundTransparency = 1
+	incomeLabel.TextSize = 22
 
-local function buildTopBar()
-	local bar = Instance.new("Frame")
-	bar.Name = "TopBar"
-	bar.Position = UDim2.fromOffset(0, 0)
-	bar.Size = UDim2.new(1, 0, 0, 64)
-	bar.BackgroundColor3 = Color3.fromRGB(17, 22, 48)
-	bar.BackgroundTransparency = 0.12
-	bar.BorderSizePixel = 0
-	bar.Parent = gui
-	local accent = Instance.new("Frame")
-	accent.Name = "Accent"
-	accent.Position = UDim2.new(0, 0, 1, -3)
-	accent.Size = UDim2.new(1, 0, 0, 3)
-	accent.BackgroundColor3 = Color3.fromRGB(255, 205, 65)
-	accent.BorderSizePixel = 0
-	accent.Parent = bar
+	rebirthLabel = label("Rebirth", UDim2.fromScale(0.34, 0.5), Color3.fromRGB(160, 200, 255), UDim2.fromScale(0.66, 0), top, "Noob")
+	rebirthLabel.BackgroundTransparency = 1
+	rebirthLabel.TextSize = 22
 
-	local function statCard(x, title, icon, color)
-		local card = Instance.new("Frame")
-		card.Position = UDim2.fromOffset(x, 8)
-		card.Size = UDim2.fromOffset(160, 48)
-		card.BackgroundColor3 = Color3.fromRGB(26, 30, 59)
-		card.BorderSizePixel = 0
-		card.Parent = bar
-		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(0, 10)
-		corner.Parent = card
-		local dot = Instance.new("Frame")
-		dot.Position = UDim2.fromOffset(10, 15)
-		dot.Size = UDim2.fromOffset(18, 18)
-		dot.BackgroundColor3 = color
-		dot.BorderSizePixel = 0
-		dot.Parent = card
-		local dotCorner = Instance.new("UICorner")
-		dotCorner.CornerRadius = UDim.new(0, 9)
-		dotCorner.Parent = dot
-		makeLabel(card, "Icon", UDim2.fromOffset(14, 14), UDim2.fromOffset(12, 20), 11, Color3.fromRGB(18, 20, 35), Enum.Font.GothamBlack).Text = icon
-		makeLabel(card, "Title", UDim2.fromOffset(36, 6), UDim2.fromOffset(120, 14), 9, Color3.fromRGB(166, 176, 213)).Text = title
-		return makeLabel(card, "Value", UDim2.fromOffset(36, 22), UDim2.fromOffset(120, 20), 15, Color3.fromRGB(250, 252, 255))
-	end
-
-	labels.cash = statCard(210, "CASH", "$", Color3.fromRGB(255, 204, 55))
-	labels.income = statCard(380, "INCOME / SEC", "+", Color3.fromRGB(70, 219, 173))
-	labels.rebirth = statCard(550, "REBIRTHS", "R", Color3.fromRGB(225, 102, 255))
-	labels.cash.Text = "$3,500"
-	labels.income.Text = "$0/s"
-	labels.rebirth.Text = "0  x1.0"
-
-	labels.lockButton = makeButton(bar, "LockButton", UDim2.fromOffset(730, 10), UDim2.fromOffset(84, 44), "LOCK [L]", Color3.fromRGB(86, 132, 255))
-	labels.shopButton = makeButton(bar, "ShopButton", UDim2.fromOffset(824, 10), UDim2.fromOffset(84, 44), "SHOP", Color3.fromRGB(255, 160, 53))
-	labels.collectionButton = makeButton(bar, "CollectionButton", UDim2.fromOffset(918, 10), UDim2.fromOffset(128, 44), "COLLECTION [C]", Color3.fromRGB(203, 87, 255))
-	labels.rebirthButton = makeButton(bar, "RebirthButton", UDim2.fromOffset(1056, 10), UDim2.fromOffset(150, 44), "REBIRTH", Color3.fromRGB(49, 211, 165))
-	-- Title lives bottom-right, not in the top bar: at 1280px wide the old
-	-- spot (x 1070..1270) sat on top of the REBIRTH button (1056..1206).
-	labels.title = makeLabel(gui, "Title", UDim2.new(1, -220, 1, -30), UDim2.fromOffset(200, 22), 13, Color3.fromRGB(255, 240, 126), Enum.Font.GothamBlack)
-	labels.title.TextXAlignment = Enum.TextXAlignment.Right
-	labels.title.Text = "BRAINROT BASE WARS"
-end
-
-local function buildBannerToastPrompt()
-	local banner = Instance.new("Frame")
-	banner.Name = "EventBanner"
+	-- Event banner (top center, slides in and fades).
+	banner = Instance.new("TextLabel")
+	banner.Name = "Banner"
+	banner.Size = UDim2.fromScale(0.7, 0)
+	banner.Size = UDim2.fromOffset(640, 60)
+	banner.Position = UDim2.new(0.5, 0, 0, 120)
 	banner.AnchorPoint = Vector2.new(0.5, 0)
-	banner.Position = UDim2.new(0.5, 0, 0, 76)
-	banner.Size = UDim2.fromOffset(560, 44)
-	banner.BackgroundColor3 = Color3.fromRGB(78, 35, 96)
-	banner.BorderSizePixel = 0
+	banner.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+	banner.BackgroundTransparency = 0.2
+	banner.TextColor3 = Color3.fromRGB(255, 255, 255)
+	banner.Font = Enum.Font.SourceSansBold
+	banner.TextSize = 30
+	banner.Text = ""
 	banner.Visible = false
 	banner.Parent = gui
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 12)
-	corner.Parent = banner
-	labels.bannerText = makeLabel(banner, "Text", UDim2.fromOffset(16, 0), UDim2.new(1, -32, 1, 0), 15, Color3.fromRGB(255, 245, 189), Enum.Font.GothamBlack)
-	labels.bannerText.TextXAlignment = Enum.TextXAlignment.Center
-	labels.banner = banner
 
-	local toast = makeLabel(gui, "Toast", UDim2.new(0.5, -300, 1, -150), UDim2.fromOffset(600, 30), 16, Color3.fromRGB(255, 255, 255), Enum.Font.GothamBold)
-	toast.TextXAlignment = Enum.TextXAlignment.Center
-	toast.TextStrokeColor3 = Color3.fromRGB(10, 10, 20)
-	toast.TextStrokeTransparency = 0.2
-	labels.toast = toast
-
-	local prompt = makeLabel(gui, "Prompt", UDim2.new(0.5, -300, 1, -110), UDim2.fromOffset(600, 30), 16, Color3.fromRGB(255, 242, 135), Enum.Font.GothamBlack)
-	prompt.TextXAlignment = Enum.TextXAlignment.Center
-	prompt.TextStrokeColor3 = Color3.fromRGB(10, 10, 20)
-	prompt.TextStrokeTransparency = 0.2
-	labels.prompt = prompt
-
-	local hint = makeLabel(gui, "Hint", UDim2.new(0, 16, 1, -34), UDim2.fromOffset(560, 22), 12, Color3.fromRGB(220, 226, 245))
-	hint.Text = "WASD move - E interact - Q slap rival - L lock base - C collection"
-	hint.TextStrokeColor3 = Color3.fromRGB(10, 10, 20)
-	hint.TextStrokeTransparency = 0.3
+	HUD.cashLabel = cashLabel
+	HUD.incomeLabel = incomeLabel
+	HUD.rebirthLabel = rebirthLabel
+	HUD.banner = banner
+	return top
 end
 
-local function rarityColor(name)
-	if gameData then
-		for _, rarity in ipairs(gameData.rarities) do
-			if rarity.name == name then
-				local c = rarity.color
-				return Color3.new(c[1], c[2], c[3])
-			end
-		end
+-- ------------------------------------------------------------------ updates
+
+local function money(v)
+	return "$" .. tostring(math.floor(v))
+end
+
+function HUD.updateCash(v)
+	if cashLabel then
+		cashLabel.Text = money(v)
 	end
-	return Color3.fromRGB(200, 200, 200)
 end
 
-local function buildCollectionPanel()
-	local panel = makePanel(gui, "CollectionPanel", UDim2.new(0.5, -360, 0.5, -240), UDim2.fromOffset(720, 480))
-	panels.collection = panel
-	makeLabel(panel, "Header", UDim2.fromOffset(20, 14), UDim2.fromOffset(500, 28), 20, Color3.fromRGB(248, 249, 255), Enum.Font.GothamBlack).Text = "BRAINROT COLLECTION"
-	labels.collectionCount = makeLabel(panel, "Count", UDim2.fromOffset(20, 44), UDim2.fromOffset(500, 18), 12, Color3.fromRGB(148, 161, 201))
-	labels.collectionCount.Text = "0 OWNED"
-	local close = makeButton(panel, "Close", UDim2.fromOffset(660, 12), UDim2.fromOffset(44, 32), "X", Color3.fromRGB(220, 60, 76))
-	close.TextSize = 16
-	close.MouseButton1Click:Connect(function()
-		panel.Visible = false
+function HUD.updateIncome(v, mult)
+	if incomeLabel then
+		incomeLabel.Text = money(v) .. "/s x" .. tostring(mult)
+	end
+end
+
+function HUD.updateRebirth(count, title)
+	if rebirthLabel then
+		rebirthLabel.Text = "Rebirth " .. tostring(count) .. " - " .. tostring(title)
+	end
+end
+
+-- Show the event banner, fading it out after a few seconds.
+function HUD.showBanner(text)
+	if not banner then
+		return
+	end
+	lastBannerText = text
+	banner.Text = text
+	banner.Visible = true
+	banner.BackgroundTransparency = 0.2
+	spawn(function()
+		task.wait(4)
+		if lastBannerText == text then
+			banner.Visible = false
+		end
 	end)
+end
 
-	local scroll = Instance.new("ScrollingFrame")
-	scroll.Name = "List"
-	scroll.Position = UDim2.fromOffset(16, 72)
-	scroll.Size = UDim2.new(1, -32, 1, -88)
-	scroll.BackgroundTransparency = 1
-	scroll.BorderSizePixel = 0
-	scroll.ScrollBarThickness = 6
-	scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-	scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	scroll.Parent = panel
-	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 6)
-	layout.Parent = scroll
+-- ---------------------------------------------------------------- buttons
 
-	if gameData then
-		for _, brainrot in ipairs(gameData.brainrots) do
-			local color = Color3.new(brainrot.color[1], brainrot.color[2], brainrot.color[3])
-			local row = Instance.new("Frame")
-			row.Name = brainrot.id
-			row.Size = UDim2.new(1, 0, 0, 44)
-			row.BackgroundColor3 = Color3.fromRGB(30, 35, 66)
-			row.BorderSizePixel = 0
-			row.Parent = scroll
-			local rowCorner = Instance.new("UICorner")
-			rowCorner.CornerRadius = UDim.new(0, 9)
-			rowCorner.Parent = row
-			local chip = Instance.new("Frame")
-			chip.Position = UDim2.fromOffset(8, 7)
-			chip.Size = UDim2.fromOffset(30, 30)
-			chip.BackgroundColor3 = color
-			chip.BorderSizePixel = 0
-			chip.Parent = row
-			local chipCorner = Instance.new("UICorner")
-			chipCorner.CornerRadius = UDim.new(0, 7)
-			chipCorner.Parent = chip
-			makeLabel(row, "Name", UDim2.fromOffset(48, 5), UDim2.fromOffset(280, 18), 13, Color3.fromRGB(240, 242, 255)).Text = brainrot.name
-			local rarityLabel = makeLabel(row, "Rarity", UDim2.fromOffset(48, 24), UDim2.fromOffset(180, 14), 11, rarityColor(brainrot.rarity))
-			rarityLabel.Text = brainrot.rarity:upper()
-			makeLabel(row, "Income", UDim2.new(1, -220, 0, 12), UDim2.fromOffset(100, 18), 13, Color3.fromRGB(103, 235, 165)).Text = ("+$%d/s"):format(brainrot.income)
-			local ownedLabel = makeLabel(row, "Owned", UDim2.new(1, -110, 0, 12), UDim2.fromOffset(100, 18), 12, Color3.fromRGB(238, 224, 144))
-			ownedLabel.TextXAlignment = Enum.TextXAlignment.Right
-			ownedLabel.Text = formatMoney(brainrot.price)
-			rows[brainrot.id] = ownedLabel
-			rowPrices[brainrot.id] = brainrot.price
-		end
-	end
+local callbacks = {}
+HUD.callbacks = callbacks
 
-	-- Rarity ladder under the list: every tier, its weight and base income.
-	local ladder = makeLabel(panel, "Ladder", UDim2.fromOffset(20, 0), UDim2.fromOffset(680, 16), 11, Color3.fromRGB(148, 161, 201))
-	ladder.Position = UDim2.new(0, 20, 1, -24)
-	if gameData then
-		-- Percentages are computed from the total weight, not assumed to
-		-- sum to 100: the rarity rebalance moved the total to 100.8.
-		local totalWeight = 0
-		for _, rarity in ipairs(gameData.rarities) do
-			totalWeight += rarity.weight
+local function makeButton(name, text, pos, color)
+	local b = Instance.new("TextButton")
+	b.Name = name
+	b.Size = UDim2.new(0.14, 0, 0, 44)
+	b.Position = pos
+	b.BackgroundColor3 = color
+	b.BorderSizePixel = 0
+	b.TextColor3 = Color3.new(1, 1, 1)
+	b.Font = Enum.Font.SourceSansBold
+	b.TextSize = 18
+	b.Text = text
+	b.Parent = gui
+	return b
+end
+
+-- Build the bottom-left control buttons.
+function HUD.buildButtons()
+	lockButton = makeButton("LockButton", "[L] Lock Base", UDim2.new(0.02, 0, 108, 0), Color3.fromRGB(60, 120, 200))
+	lockText = lockButton
+	shopButton = makeButton("ShopButton", "Shop", UDim2.new(0.02, 0, 160, 0), Color3.fromRGB(180, 140, 40))
+	collectionButton = makeButton("CollectionButton", "Collection", UDim2.new(0.02, 0, 212, 0), Color3.fromRGB(120, 90, 200))
+
+	lockButton.Activated:Connect(function()
+		if callbacks.onLock then
+			callbacks.onLock()
 		end
-		for _, rarity in ipairs(gameData.rarities) do
-			local pct = rarity.weight / totalWeight * 100
-			local pctText = pct == math.floor(pct) and tostring(pct) or ("%.1f"):format(pct)
-			table.insert(parts, ("%s %s%%"):format(rarity.name, pctText))
+	end)
+	shopButton.Activated:Connect(function()
+		if callbacks.onShop then
+			callbacks.onShop()
 		end
-		ladder.Text = "Rarity weights (of spawns): " .. table.concat(parts, "  -  ")
-	else
-		ladder.Text = "Rarities: Common - Rare - Epic - Legendary - Mythic - Brainrot God - Secret"
+	end)
+	collectionButton.Activated:Connect(function()
+		if callbacks.onCollection then
+			callbacks.onCollection()
+		end
+	end)
+end
+
+-- Set the lock button's cooldown text and enabled state.
+function HUD.updateLock(secondsLeft, ready)
+	if lockButton then
+		if ready then
+			lockButton.Text = "[L] Lock Base"
+			lockButton.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+		else
+			lockButton.Text = "Lock (" .. tostring(math.ceil(secondsLeft)) .. "s)"
+			lockButton.BackgroundColor3 = Color3.fromRGB(70, 70, 80)
+		end
 	end
 end
 
-local function buildShopPanel()
-	local panel = makePanel(gui, "ShopPanel", UDim2.new(0.5, -220, 0.5, -190), UDim2.fromOffset(440, 380))
-	panels.shop = panel
-	makeLabel(panel, "Header", UDim2.fromOffset(20, 14), UDim2.fromOffset(300, 28), 20, Color3.fromRGB(248, 249, 255), Enum.Font.GothamBlack).Text = "UPGRADES"
-	local close = makeButton(panel, "Close", UDim2.fromOffset(380, 12), UDim2.fromOffset(44, 32), "X", Color3.fromRGB(220, 60, 76))
-	close.TextSize = 16
-	close.MouseButton1Click:Connect(function()
-		panel.Visible = false
-	end)
+HUD.lockButton = lockButton
 
-	local upgrades = {
-		{ key = "Pedestal", title = "Extra Pedestal", desc = "One more base slot (max 12)" },
-		{ key = "Conveyor", title = "Faster Conveyor", desc = "Brainrots spawn more often" },
-		{ key = "Income", title = "Income Boost", desc = "+25% income multiplier" },
-	}
-	labels.upgradeButtons = {}
-	labels.upgradeDescs = {}
-	for index, upgrade in ipairs(upgrades) do
-		local y = 60 + (index - 1) * 96
-		local row = Instance.new("Frame")
-		row.Position = UDim2.fromOffset(16, y)
-		row.Size = UDim2.new(1, -32, 0, 84)
-		row.BackgroundColor3 = Color3.fromRGB(30, 35, 66)
+-- ---------------------------------------------------------------- collection
+
+-- Build the collection panel: the rarity ladder and which brainrots are owned.
+function HUD.buildCollection(rarities, brainrots)
+	collectionFrame = Instance.new("Frame")
+	collectionFrame.Name = "CollectionFrame"
+	collectionFrame.Size = UDim2.new(0.3, 0, 0.8, 0)
+	collectionFrame.Position = UDim2.new(0.34, 0, 0.1, 0)
+	collectionFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 24)
+	collectionFrame.BackgroundTransparency = 0.15
+	collectionFrame.BorderSizePixel = 0
+	collectionFrame.Visible = false
+	collectionFrame.Parent = gui
+
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.Size = UDim2.new(1, 0, 0, 40)
+	title.BackgroundTransparency = 1
+	title.Text = "COLLECTION"
+	title.TextColor3 = Color3.new(1, 1, 1)
+	title.Font = Enum.Font.SourceSansBold
+	title.TextSize = 24
+	title.Parent = collectionFrame
+
+	local list = Instance.new("Frame")
+	list.Name = "List"
+	list.Size = UDim2.new(1, 0, 1, -40)
+	list.Position = UDim2.new(0, 0, 0, 40)
+	list.BackgroundTransparency = 1
+	list.Parent = collectionFrame
+
+	-- Rows: one per rarity tier, listing its brainrots.
+	local y = 0
+	local owned = HUD.owned or {}
+	for _, r in ipairs(rarities) do
+		local row = Instance.new("TextLabel")
+		row.Name = "Rarity_" .. r.name
+		row.Size = UDim2.new(1, 0, 0, 26)
+		row.Position = UDim2.new(0, 0, 0, y)
+		row.BackgroundColor3 = Color3.fromRGB(r.color[1], r.color[2], r.color[3])
 		row.BorderSizePixel = 0
-		row.Parent = panel
-		local rowCorner = Instance.new("UICorner")
-		rowCorner.CornerRadius = UDim.new(0, 10)
-		rowCorner.Parent = row
-		makeLabel(row, "Title", UDim2.fromOffset(14, 10), UDim2.fromOffset(240, 20), 15, Color3.fromRGB(240, 242, 255)).Text = upgrade.title
-		local desc = makeLabel(row, "Desc", UDim2.fromOffset(14, 34), UDim2.fromOffset(240, 34), 12, Color3.fromRGB(148, 161, 201))
-		desc.Text = upgrade.desc
-		labels.upgradeDescs[upgrade.key] = desc
-		local buy = makeButton(row, "Buy", UDim2.new(1, -130, 0, 20), UDim2.fromOffset(116, 44), "BUY", Color3.fromRGB(49, 211, 165))
-		buy.MouseButton1Click:Connect(function()
-			if remotes and remotes.BuyUpgrade then
-				remotes.BuyUpgrade:FireServer(upgrade.key)
-			end
-		end)
-		labels.upgradeButtons[upgrade.key] = buy
-	end
-end
-
-function HUD.SetState(payload)
-	state = payload
-	labels.cash.Text = formatMoney(payload.cash)
-	if payload.goldenRemaining and payload.goldenRemaining > 0 then
-		labels.income.Text = ("$%d/s  ★GOLDEN %ds"):format(payload.income, payload.goldenRemaining)
-	else
-		labels.income.Text = ("$%d/s"):format(payload.income)
-	end
-	labels.rebirth.Text = ("%d  x%.1f"):format(payload.rebirths, payload.multiplier)
-	if payload.lockRemaining and payload.lockRemaining > 0 then
-		labels.lockButton.Text = ("LOCKED %ds"):format(payload.lockRemaining)
-		labels.lockButton.BackgroundColor3 = Color3.fromRGB(49, 211, 165)
-	elseif payload.lockCooldown and payload.lockCooldown > 0 then
-		labels.lockButton.Text = ("LOCK %ds"):format(payload.lockCooldown)
-		labels.lockButton.BackgroundColor3 = Color3.fromRGB(120, 124, 150)
-	else
-		labels.lockButton.Text = "LOCK [L]"
-		labels.lockButton.BackgroundColor3 = Color3.fromRGB(86, 132, 255)
-	end
-	if payload.rebirthNeed then
-		labels.rebirthButton.Text = ("REBIRTH %d+%s"):format(payload.rebirthNeed.count, formatMoney(payload.rebirthNeed.cash))
-	end
-	if payload.upgradeCosts then
-		for key, button in pairs(labels.upgradeButtons or {}) do
-			local cost = payload.upgradeCosts[key]
-			button.Text = cost and formatMoney(cost) or "MAX"
-		end
-	end
-	-- Shop rows used to show only a static description: a player could not
-	-- tell what level an upgrade was at. Show the live level next to it.
-	if payload.upgradeLevels then
-		local levels = payload.upgradeLevels
-		local descs = labels.upgradeDescs or {}
-		if descs.Pedestal then
-			descs.Pedestal.Text = ("One more base slot — have %d/12"):format(levels.Pedestal or 6)
-		end
-		if descs.Conveyor then
-			descs.Conveyor.Text = ("Brainrots spawn more often — Lv %d/5"):format(levels.Conveyor or 0)
-		end
-		if descs.Income then
-			descs.Income.Text = ("+25% income multiplier — now x%.2f"):format(levels.Income or 1)
-		end
-	end
-	if payload.ownedIds then
-		local owned = {}
-		for _, id in ipairs(payload.ownedIds) do
-			owned[id] = true
-		end
-		for id, label in pairs(rows) do
-			if owned[id] then
-				label.Text = "OWNED"
-				label.TextColor3 = Color3.fromRGB(103, 235, 165)
-			else
-				-- Rows used to stay "OWNED" forever once bought: a brainrot
-				-- stolen by the rival (or cleared by a rebirth) still showed
-				-- as owned. Reset non-owned rows to their price.
-				label.Text = formatMoney(rowPrices[id] or 0)
-				label.TextColor3 = Color3.fromRGB(238, 224, 144)
+		row.TextColor3 = Color3.new(0, 0, 0)
+		row.Font = Enum.Font.SourceSansBold
+		row.TextSize = 18
+		row.Text = r.name .. " (x" .. tostring(r.weight) .. ")"
+		row.Parent = list
+		y += 26
+		for _, b in ipairs(brainrots) do
+			if b.rarity == r.name then
+				local ownedMark = owned[b.name] and "  [OWNED]" or ""
+				local item = Instance.new("TextLabel")
+				item.Name = "Item_" .. b.name
+				item.Size = UDim2.new(1, 0, 0, 20)
+				item.Position = UDim2.new(0.1, 0, 0, y)
+				item.BackgroundTransparency = 1
+				item.TextColor3 = owned[b.name] and Color3.new(0.4, 1, 0.4) or Color3.new(0.7, 0.7, 0.7)
+				item.Font = Enum.Font.SourceSans
+				item.TextSize = 15
+				item.Text = b.name .. "  $" .. tostring(b.income) .. "/s" .. ownedMark
+				item.Parent = list
+				y += 20
 			end
 		end
-		labels.collectionCount.Text = ("%d OWNED  /  %d PEDESTALS"):format(payload.ownedCount or 0, payload.pedestals or 0)
+	end
+	HUD.collectionFrame = collectionFrame
+	return collectionFrame
+end
+
+-- Toggle the collection panel.
+function HUD.toggleCollection()
+	if collectionFrame then
+		collectionFrame.Visible = not collectionFrame.Visible
 	end
 end
 
-function HUD.ShowToast(text)
-	labels.toast.Text = text
-	task.delay(3, function()
-		if labels.toast.Text == text then
-			labels.toast.Text = ""
-		end
-	end)
-end
-
-function HUD.ShowBanner(text, duration)
-	labels.bannerText.Text = text
-	labels.banner.Visible = true
-	task.delay(duration or 5, function()
-		if labels.bannerText.Text == text then
-			labels.banner.Visible = false
-		end
-	end)
-end
-
-function HUD.SetPrompt(text)
-	labels.prompt.Text = text or ""
-end
-
-function HUD.ToggleCollection()
-	panels.shop.Visible = false
-	panels.collection.Visible = not panels.collection.Visible
-end
-
-function HUD.ToggleShop()
-	panels.collection.Visible = false
-	panels.shop.Visible = not panels.shop.Visible
-end
-
-function HUD.GetGui()
-	return gui
-end
-
-function HUD.Build(remotesFolder)
-	remotes = remotesFolder
-	gui = Instance.new("ScreenGui")
-	gui.Name = "BrainrotHUD"
-	gui.ResetOnSpawn = false
-	gui.IgnoreGuiInset = true
-	gui.DisplayOrder = 10
-	buildTopBar()
-	buildBannerToastPrompt()
-	buildCollectionPanel()
-	buildShopPanel()
-	labels.lockButton.MouseButton1Click:Connect(function()
-		if remotes and remotes.LockBase then
-			remotes.LockBase:FireServer()
-		end
-	end)
-	labels.shopButton.MouseButton1Click:Connect(HUD.ToggleShop)
-	labels.collectionButton.MouseButton1Click:Connect(HUD.ToggleCollection)
-	labels.rebirthButton.MouseButton1Click:Connect(function()
-		if remotes and remotes.Rebirth then
-			remotes.Rebirth:FireServer()
-		end
-	end)
-	gui.Parent = player:WaitForChild("PlayerGui")
-	return HUD
+-- Update which brainrots the player owns (for the collection panel).
+function HUD.setOwned(names)
+	HUD.owned = names or {}
 end
 
 return HUD

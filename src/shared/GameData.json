@@ -1,66 +1,68 @@
 {
-  "world": {
-    "arena": { "size": [200, 1, 200], "color": [0.20, 0.78, 0.48] },
-    "playerBase": { "center": [0, 2, 70], "size": [52, 4, 50], "color": [0.20, 0.45, 0.95] },
-    "rivalBase": { "center": [0, 2, -70], "size": [52, 4, 50], "color": [0.86, 0.24, 0.30] },
-    "conveyor": { "start": [0, 3.35, -42], "end": [0, 3.35, 43], "width": 12, "speed": 4.2 },
-    "playerSlots": [
-      [-18, 5, 58], [-9, 5, 58], [0, 5, 58], [9, 5, 58], [18, 5, 58],
-      [-18, 5, 70], [-9, 5, 70], [0, 5, 70], [9, 5, 70], [18, 5, 70],
-      [-12, 5, 84], [12, 5, 84]
-    ],
-    "rivalSlots": [
-      [-15, 5, -70], [0, 5, -70], [15, 5, -70],
-      [-15, 5, -82], [0, 5, -82], [15, 5, -82]
-    ],
-    "props": [
-      { "type": "tree", "position": [-65, 0, -55], "color": [0.12, 0.55, 0.22] },
-      { "type": "tree", "position": [62, 0, 48], "color": [0.12, 0.55, 0.22] },
-      { "type": "tree", "position": [-58, 0, 62], "color": [0.15, 0.62, 0.25] },
-      { "type": "tree", "position": [60, 0, -67], "color": [0.15, 0.62, 0.25] },
-      { "type": "sign", "position": [-25, 4, 35], "text": "YOUR BASE" },
-      { "type": "sign", "position": [25, 4, 35], "text": "RIVAL BASE" },
-      { "type": "coin", "position": [-38, 5, 10], "color": [1, 0.82, 0.08] },
-      { "type": "coin", "position": [38, 5, -10], "color": [1, 0.82, 0.08] }
-    ]
+  "game": {
+    "name": "Brainrot Base Wars",
+    "startCash": 100,
+    "incomeTick": 1.0,
+    "buyRadius": 6,
+    "carrySlow": 0.55,
+    "pedestalMax": 12,
+    "pedestalStart": 1,
+    "pedestalCostStep": 250,
+    "lockDuration": 30,
+    "lockCooldown": 60,
+    "rainEvery": 90,
+    "goldenEvery": 300,
+    "goldenDuration": 60,
+    "dropDespawn": 60,
+    "conveyorLength": 90,
+    "conveyorSpeed": 4.5,
+    "spawnInterval": 6.0,
+    "spawnGap": 9
   },
-  "rarities": [
-    { "name": "Common", "color": [0.65, 0.68, 0.72], "weight": 50, "income": 1 },
-    { "name": "Rare", "color": [0.12, 0.55, 1], "weight": 25, "income": 4 },
-    { "name": "Epic", "color": [0.63, 0.25, 0.96], "weight": 13, "income": 12 },
-    { "name": "Legendary", "color": [1, 0.58, 0.08], "weight": 7, "income": 40 },
-    { "name": "Mythic", "color": [1, 0.12, 0.56], "weight": 3.5, "income": 140 },
-    { "name": "Brainrot God", "color": [0.10, 0.95, 0.92], "weight": 2.0, "income": 520 },
-    { "name": "Secret", "color": [0.08, 0.06, 0.12], "weight": 0.3, "income": 2200 }
-  ],
   "mutations": [
-    { "name": "None", "multiplier": 1, "color": [1, 1, 1], "weight": 1000 },
-    { "name": "Golden", "multiplier": 2, "color": [1, 0.72, 0.08], "weight": 12 },
-    { "name": "Diamond", "multiplier": 5, "color": [0.25, 0.85, 1], "weight": 5 },
-    { "name": "Rainbow", "multiplier": 10, "color": [0.90, 0.20, 1], "weight": 1.5 },
-    { "name": "Bloodrot", "multiplier": 25, "color": [0.72, 0.03, 0.04], "weight": 0.35 }
+    { "name": "Normal", "mult": 1, "chance": 94.67 },
+    { "name": "Golden", "mult": 2, "chance": 4.0 },
+    { "name": "Diamond", "mult": 5, "chance": 1.0 },
+    { "name": "Rainbow", "mult": 10, "chance": 0.25 },
+    { "name": "Bloodrot", "mult": 25, "chance": 0.08 }
+  ],
+  "rarities": [
+    { "name": "Common", "color": [185, 186, 199], "weight": 42 },
+    { "name": "Rare", "color": [96, 151, 235], "weight": 28 },
+    { "name": "Epic", "color": [166, 84, 224], "weight": 16 },
+    { "name": "Legendary", "color": [237, 172, 31], "weight": 8 },
+    { "name": "Mythic", "color": [224, 48, 94], "weight": 4.2 },
+    { "name": "Brainrot God", "color": [0, 227, 155], "weight": 2.0 },
+    { "name": "Secret", "color": [255, 190, 233], "weight": 0.3 }
   ],
   "brainrots": [
-    { "id": "tung", "name": "Tung Tung Tung Sahur", "rarity": "Common", "income": 2, "price": 250, "color": [0.91, 0.73, 0.42], "size": [2.2, 3.8, 2.2], "weight": 15 },
-    { "id": "tralalero", "name": "Tralalero Tralala", "rarity": "Common", "income": 3, "price": 350, "color": [0.18, 0.55, 0.92], "size": [2.6, 3.2, 2.2], "weight": 15 },
-    { "id": "ballerina", "name": "Ballerina Cappuccina", "rarity": "Common", "income": 4, "price": 500, "color": [0.95, 0.47, 0.70], "size": [2.1, 3.5, 2.1], "weight": 15 },
-    { "id": "bombardiro", "name": "Bombardiro Crocodilo", "rarity": "Rare", "income": 8, "price": 900, "color": [0.28, 0.72, 0.35], "size": [3.2, 2.7, 2.6], "weight": 12 },
-    { "id": "lirili", "name": "Lirili Larila", "rarity": "Rare", "income": 10, "price": 1100, "color": [0.88, 0.78, 0.32], "size": [2.2, 4.0, 2.2], "weight": 12 },
-    { "id": "chimpanzini", "name": "Chimpanzini Bananini", "rarity": "Rare", "income": 12, "price": 1300, "color": [0.62, 0.38, 0.18], "size": [2.4, 3.4, 2.4], "weight": 12 },
-    { "id": "lavaca", "name": "La Vaca Saturno Saturnita", "rarity": "Epic", "income": 25, "price": 2600, "color": [0.75, 0.18, 0.85], "size": [2.8, 3.8, 2.5], "weight": 8 },
-    { "id": "frigo", "name": "Frigo Camelo", "rarity": "Epic", "income": 30, "price": 3000, "color": [0.35, 0.82, 0.92], "size": [2.5, 4.0, 2.5], "weight": 8 },
-    { "id": "trippi", "name": "Trippi Troppi", "rarity": "Epic", "income": 35, "price": 3500, "color": [0.98, 0.46, 0.10], "size": [2.2, 3.6, 2.2], "weight": 8 },
-    { "id": "assassino", "name": "Cappuccino Assassino", "rarity": "Legendary", "income": 80, "price": 7000, "color": [0.22, 0.17, 0.13], "size": [2.2, 3.9, 2.2], "weight": 6 },
-    { "id": "giraffa", "name": "Giraffa Celeste", "rarity": "Legendary", "income": 95, "price": 8000, "color": [0.36, 0.82, 1], "size": [2.0, 4.8, 2.0], "weight": 6 },
-    { "id": "pot", "name": "Pot Hotspot", "rarity": "Legendary", "income": 110, "price": 9000, "color": [0.95, 0.25, 0.08], "size": [2.7, 3.0, 2.7], "weight": 6 },
-    { "id": "tralaleritos", "name": "Los Tralaleritos", "rarity": "Mythic", "income": 250, "price": 18000, "color": [0.98, 0.12, 0.72], "size": [2.8, 4.2, 2.8], "weight": 4 },
-    { "id": "bobrito", "name": "Bobrito Bandito", "rarity": "Mythic", "income": 300, "price": 21000, "color": [0.55, 0.25, 0.12], "size": [2.5, 3.4, 2.5], "weight": 4 },
-    { "id": "cocco", "name": "Cocco Ninja", "rarity": "Mythic", "income": 360, "price": 24000, "color": [0.14, 0.14, 0.18], "size": [2.3, 3.8, 2.3], "weight": 4 },
-    { "id": "trololo", "name": "Grande Trololo", "rarity": "Brainrot God", "income": 1000, "price": 60000, "color": [0.08, 0.95, 0.90], "size": [3.3, 4.8, 3.3], "weight": 2 },
-    { "id": "brr", "name": "Brr Brr Patapim", "rarity": "Brainrot God", "income": 1200, "price": 70000, "color": [0.78, 0.48, 0.24], "size": [3.0, 4.3, 3.0], "weight": 2 },
-    { "id": "sahurgod", "name": "Tung Tung Tung Sahur God", "rarity": "Brainrot God", "income": 1500, "price": 85000, "color": [0.12, 0.92, 0.86], "size": [2.7, 5.2, 2.7], "weight": 2 },
-    { "id": "bombordini", "name": "Los Bombordini Cryptini", "rarity": "Secret", "income": 5000, "price": 300000, "color": [0.10, 0.04, 0.16], "size": [3.5, 4.5, 3.2], "weight": 1 },
-    { "id": "quantum", "name": "La Cucaracha Quantum", "rarity": "Secret", "income": 6000, "price": 350000, "color": [0.30, 0.08, 0.40], "size": [3.0, 4.0, 3.0], "weight": 1 },
-    { "id": "ultimate", "name": "Tralalero Tralalero Tung Tung", "rarity": "Secret", "income": 8000, "price": 450000, "color": [0.04, 0.03, 0.08], "size": [3.2, 4.8, 3.2], "weight": 1 }
+    { "name": "Tung Tung Tung Sahur", "rarity": "Common", "income": 2, "color": [238, 130, 128] },
+    { "name": "Tralalero Tralala", "rarity": "Common", "income": 3, "color": [255, 190, 90] },
+    { "name": "Lirili Larila", "rarity": "Rare", "income": 6, "color": [150, 220, 180] },
+    { "name": "Ballerina Cappuccina", "rarity": "Rare", "income": 8, "color": [200, 180, 240] },
+    { "name": "Bombardiro Crocodilo", "rarity": "Epic", "income": 14, "color": [90, 200, 140] },
+    { "name": "Trippi Troppi", "rarity": "Epic", "income": 18, "color": [90, 190, 220] },
+    { "name": "Frigo Camelo", "rarity": "Legendary", "income": 32, "color": [170, 140, 110] },
+    { "name": "La Vaca Saturno Saturnita", "rarity": "Legendary", "income": 40, "color": [120, 90, 200] },
+    { "name": "Giraffa Celeste", "rarity": "Mythic", "income": 70, "color": [110, 200, 255] },
+    { "name": "Cappuccino Assassino", "rarity": "Mythic", "income": 85, "color": [160, 90, 200] },
+    { "name": "Pot Hotspot", "rarity": "Brainrot God", "income": 150, "color": [60, 220, 160] },
+    { "name": "Chimpanzini Bananini", "rarity": "Brainrot God", "income": 175, "color": [255, 220, 60] },
+    { "name": "Il Grande Sognatore", "rarity": "Secret", "income": 500, "color": [255, 160, 220] },
+    { "name": "L'Ultimo Spaghetti Eterno", "rarity": "Secret", "income": 650, "color": [250, 210, 120] }
+  ],
+  "titles": [
+    "Noob",
+    "Connoisseur",
+    "Brainrot Enjoyer",
+    "Meme Sommelier",
+    "High-Quality Doodler",
+    "Certified Luncher",
+    "Peak Brainrot",
+    "Grand Archivist",
+    "Living Meme",
+    "Tung Tung Lord",
+    "Immortal Brainrot",
+    "The Final Brainrot"
   ]
 }

@@ -1,334 +1,470 @@
--- Shop: the server side of every player request. Each RemoteEvent handler
--- validates before it touches state (distance, cash, free pedestal, lock),
--- because the client can send anything. All state changes go through
--- GameState; all world changes go through WorldBuilder/Conveyor/Rival.
--- After every accepted request the server pushes a fresh state snapshot to
--- that player on the StateUpdate remote (cash, income, lock, upgrades...).
+-- Shop.luau
+-- Handles buy/steal/lock/rebirth/upgrade requests from the client RemoteEvents,
+-- validates them, and updates GameState. No steal soft-lock: every steal path
+-- ends in a clean success or a clean cancel.
 
-local BrainrotData = require(script.Parent.BrainrotData)
-local Conveyor = require(script.Parent.Conveyor)
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local GameState = require(script.Parent.GameState)
-local Rival = require(script.Parent.Rival)
+local BrainrotData = require(script.Parent.BrainrotData)
 local WorldBuilder = require(script.Parent.WorldBuilder)
+local Conveyor = require(script.Parent.Conveyor)
 
 local Shop = {}
 
-local remotes
-local NORMAL_SPEED = 16
-local CARRY_SPEED = 10
-local INTERACT_RANGE = 12
-local SLAP_RANGE = 14
+local REMOTE_FOLDER = "RemoteEvents"
+local remotes = {}
+local events
 
-local function getRoot(player)
-	local character = player.Character
-	return character and character:FindFirstChild("HumanoidRootPart")
+-- Called once by init.server with the game's configuration.
+function Shop.configure(cfg, eventsTable)
+	Shop.cfg = cfg
+	events = eventsTable
+	WorldBuilder.init()
 end
 
-local function setWalkSpeed(player, speed)
-	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.WalkSpeed = speed
+local function getRemote(name)
+	local r = remotes[name]
+	if not r then
+		r = ReplicatedStorage:WaitForChild(REMOTE_FOLDER):WaitForChild(name)
+		remotes[name] = r
 	end
+	return r
 end
 
-local function fire(player, payload)
-	if remotes and remotes.StateUpdate then
-		remotes.StateUpdate:FireClient(player, payload)
-	end
-end
+Shop.getRemote = getRemote
 
-local function toast(player, text)
-	fire(player, { type = "Toast", text = text })
-end
-
-local function effect(player, kind, position)
-	fire(player, { type = "Effect", kind = kind, position = position })
-end
-
--- The snapshot the HUD renders from. Sent after income ticks, events and
--- every accepted request, so the client never has to guess at server state.
-function Shop.BuildStatePayload(player)
-	local state = GameState.Get(player)
-	if not state then
-		return nil
-	end
-	local ownedIds = {}
-	for _, owned in ipairs(state.owned) do
-		table.insert(ownedIds, owned.id)
-	end
-	return {
-		type = "State",
-		cash = math.floor(state.cash),
-		income = math.floor(GameState.GetTotalIncome(player)),
-		baseIncome = math.floor(GameState.GetBaseIncome(player)),
-		multiplier = GameState.GetIncomeMultiplier(player),
-		rebirths = state.rebirths,
-		title = GameState.GetTitle(player),
-		pedestals = state.pedestals,
-		ownedCount = #state.owned,
-		ownedIds = ownedIds,
-		carrying = state.carrying ~= nil,
-		lockRemaining = math.floor(GameState.GetLockRemaining(player)),
-		lockCooldown = math.floor(GameState.GetLockCooldownRemaining(player)),
-		goldenRemaining = math.floor(GameState.GetGoldenRemaining(player)),
-		upgradeCosts = {
-			Pedestal = GameState.GetUpgradeCost(state, "Pedestal"),
-			Conveyor = GameState.GetUpgradeCost(state, "Conveyor"),
-			Income = GameState.GetUpgradeCost(state, "Income"),
-		},
-		upgradeLevels = {
-			Pedestal = state.pedestals,
-			Conveyor = state.conveyorLevel,
-			Income = state.incomeUpgrade,
-		},
-		rebirthNeed = (function()
-			local count, cash = GameState.GetRebirthRequirements(player)
-			return { count = count, cash = cash }
-		end)(),
-	}
-end
-
-function Shop.SendState(player)
-	local payload = Shop.BuildStatePayload(player)
-	if payload then
-		fire(player, payload)
-	end
-end
-
-local function modelPosition(model)
-	local root = model and model.PrimaryPart
-	return root and root.Position
-end
-
-local function withinRange(player, position, range)
-	local root = getRoot(player)
-	if not root or not position then
-		return false
-	end
-	return (root.Position - position).Magnitude <= range
-end
-
-local function onBuyBrainrot(player, model)
-	local state = GameState.Get(player)
-	if not state or typeof(model) ~= "Instance" or not Conveyor.IsSpawned(model) then
+-- Fire a client a HUD update (cash, income, etc.).
+function Shop.pushHUD(userId)
+	local ev = getRemote("HUDUpdate")
+	local player = Players:GetPlayerByUserId(userId)
+	if not ev or not player then
 		return
 	end
-	local position = modelPosition(model)
-	if not withinRange(player, position, INTERACT_RANGE) then
-		toast(player, "Too far away!")
+	local s = GameState.get(userId)
+	if not s then
 		return
 	end
-	local brainrot = BrainrotData.GetBrainrot(model:GetAttribute("BrainrotId"))
-	if not brainrot then
-		return
-	end
-	local price = model:GetAttribute("Price") or brainrot.price
-	if state.cash < price then
-		toast(player, ("Need $%d for %s"):format(price, brainrot.name))
-		return
-	end
-	local slot = GameState.GetFreeSlot(player)
-	if not slot then
-		toast(player, "No free pedestal! Buy one in the Shop.")
-		return
-	end
-	if not GameState.SpendCash(player, price) then
-		return
-	end
-	Conveyor.Take(model)
-	local mutation = model:GetAttribute("Mutation") or "None"
-	local record = GameState.AddOwned(player, brainrot.id, mutation, model, slot)
-	if not record then
-		GameState.AddCash(player, price)
-		return
-	end
-	WorldBuilder.PlaceOnPedestal(model, player, slot)
-	effect(player, "Buy", position)
-	toast(player, ("Bought %s for $%d!"):format(brainrot.name, price))
-	Shop.SendState(player)
-end
-
-local function onStealBrainrot(player, model)
-	local state = GameState.Get(player)
-	if not state or typeof(model) ~= "Instance" then
-		return
-	end
-	if state.carrying then
-		toast(player, "Already carrying one! Bring it home first.")
-		return
-	end
-	local position = modelPosition(model)
-	if not withinRange(player, position, INTERACT_RANGE) then
-		toast(player, "Too far away!")
-		return
-	end
-	-- No free pedestal: refuse the steal BEFORE taking anything. The old
-	-- code let the player pick up a brainrot they could never deliver, so
-	-- they were stuck carrying it at speed 10 with no way out except
-	-- rebirth or death.
-	if not GameState.GetFreeSlot(player) then
-		toast(player, "No free pedestal! Buy one in the Shop first.")
-		return
-	end
-	local record
-	if model:GetAttribute("CanCollect") then
-		-- A brainrot dropped by a slap: free pickup, no owner to rob.
-		local brainrot = BrainrotData.GetBrainrot(model:GetAttribute("BrainrotId"))
-		if not brainrot then
-			return
-		end
-		record = {
-			id = brainrot.id,
-			mutation = model:GetAttribute("Mutation") or "None",
-			model = model,
-			income = model:GetAttribute("Income") or brainrot.income,
-		}
-	else
-		-- Steal from the rival's base: it must still be the rival's.
-		record = GameState.RemoveRivalOwned(model)
-		if not record then
-			toast(player, "Too late - that one is gone!")
-			return
+	local mult = GameState.getMultiplier(userId)
+	local total = 0
+	for id, e in pairs(OWNED) do
+		if e.ownerUserId == userId then
+			total += e.income
 		end
 	end
-	GameState.SetCarrying(player, record)
-	WorldBuilder.AttachCarried(player, model)
-	setWalkSpeed(player, CARRY_SPEED)
-	effect(player, "Steal", position)
-	toast(player, "Stolen! Run it back to YOUR base!")
-	Shop.SendState(player)
+	total = total * mult
+	ev:FireClient(player, s.cash, total, mult, s.rebirths, s.title, s.pedestals, s.lockUntil, s.lockReadyAt)
 end
 
-local function onSlapRival(player)
-	local state = GameState.Get(player)
-	if not state then
-		return
-	end
-	if Rival.GetDistanceTo(player) > SLAP_RANGE then
-		toast(player, "Too far to slap the rival!")
-		return
-	end
-	local ok, result = Rival.Slap(player)
-	if not ok then
-		toast(player, tostring(result))
-		return
-	end
-	local rivalModel = WorldBuilder.GetRivalModel()
-	local position = rivalModel and rivalModel.PrimaryPart and rivalModel.PrimaryPart.Position
-	effect(player, "Slap", position)
-	toast(player, "SLAPPED! The rival dropped its loot!")
-	Shop.SendState(player)
+Shop.pushHUD = Shop.pushHUD
+
+-- Registry of every owned brainrot model, id -> { model, def, mutation, income,
+-- ownerUserId, pedestalIndex }. Used by the income loop, the rival, and stealing.
+local OWNED = {} -- id -> entry
+local REGISTRY_INDEX = {}
+
+local worldPlayerBase = nil
+local worldRivalBase = nil
+local onIncomeChanged = nil
+local onStealChanged = nil
+
+Shop.OWNED = OWNED
+
+-- Called after the world is built: remember the base models.
+function Shop.setWorldBases(playerBase, rivalBase)
+	worldPlayerBase = playerBase
+	worldRivalBase = rivalBase
 end
 
-local function onLockBase(player)
-	if GameState.ActivateLock(player) then
-		toast(player, "Base LOCKED for 30s - the rival can't steal!")
-	else
-		local cooldown = GameState.GetLockCooldownRemaining(player)
-		toast(player, ("Lock recharging: %ds"):format(cooldown))
-	end
-	Shop.SendState(player)
+-- The rival/income loop asks for a model entry by id.
+function Shop.entryOf(id)
+	return OWNED[id]
 end
 
-local function onRebirth(player)
-	local state = GameState.Get(player)
-	if not state then
-		return
-	end
-	local carrying = state.carrying
-	local ok, result, removed = GameState.Rebirth(player)
-	if not ok then
-		toast(player, tostring(result))
-		return
-	end
-	-- Destroy every model the rebirth cleared, plus anything carried:
-	-- GameState only clears its tables, the 3D models stay in the world.
-	for _, record in ipairs(removed or {}) do
-		WorldBuilder.DestroyBrainrot(record.model)
-	end
-	if carrying and carrying.model then
-		WorldBuilder.DestroyBrainrot(carrying.model)
-	end
-	WorldBuilder.ClearCarried(player)
-	setWalkSpeed(player, NORMAL_SPEED)
-	local position = getRoot(player) and getRoot(player).Position
-	effect(player, "Rebirth", position)
-	toast(player, ("REBIRTH #%d! Income x%.1f forever!"):format(state.rebirths, GameState.GetRebirthMultiplier(player)))
-	Shop.SendState(player)
+-- incomeOf(id) for GameState.totalIncome and the rival.
+function Shop.incomeOf(id)
+	local e = OWNED[id]
+	return e and e.income or 0
 end
 
-local function onBuyUpgrade(player, upgradeType)
-	if upgradeType ~= "Pedestal" and upgradeType ~= "Conveyor" and upgradeType ~= "Income" then
-		return
-	end
-	local state = GameState.Get(player)
-	if not state then
-		return
-	end
-	local ok, result = GameState.BuyUpgrade(player, upgradeType)
-	if not ok then
-		toast(player, tostring(result))
-		return
-	end
-	if upgradeType == "Pedestal" then
-		WorldBuilder.SetPedestalCount(player, state.pedestals)
-	end
-	toast(player, ("%s upgraded! (-$%d)"):format(upgradeType, result))
-	Shop.SendState(player)
+Shop.incomeOf = Shop.incomeOf
+
+-- Count free pedestals for a player.
+local function freePedestals(userId)
+	local s = GameState.ensure(userId)
+	return s.pedestals - Shop.countOwned(userId)
 end
 
--- Called by init's heartbeat: a carrying player standing on their own base
--- delivers the brainrot onto a free pedestal. Server-side, so the client
--- can't fake a delivery from across the map.
-function Shop.TryDeliver(player)
-	local state = GameState.Get(player)
-	if not state or not state.carrying then
-		return false
+function Shop.countOwned(userId)
+	local n = 0
+	for id, e in pairs(OWNED) do
+		if e.ownerUserId == userId then
+			n += 1
+		end
 	end
-	local root = getRoot(player)
-	if not root then
-		return false
+	return n
+end
+
+Shop.countOwned = Shop.countOwned
+
+-- Is a pedestal index occupied by any owned brainrot?
+function Shop.pedestalFree(index)
+	for id, e in pairs(OWNED) do
+		if e.pedestalIndex == index then
+			return false
+		end
 	end
-	local baseCenter = BrainrotData.World.playerBase
-	local offset = root.Position - baseCenter
-	if math.abs(offset.X) > BrainrotData.World.baseSize.X / 2 or math.abs(offset.Z) > BrainrotData.World.baseSize.Z / 2 then
-		return false
-	end
-	local slot = GameState.GetFreeSlot(player)
-	if not slot then
-		-- Keep carrying: clearing here would orphan the attached model.
-		-- The HUD shows "no free pedestal" from ownedCount vs pedestals.
-		return false
-	end
-	local record = state.carrying
-	GameState.ClearCarrying(player)
-	WorldBuilder.ClearCarried(player)
-	local placed = GameState.AddOwned(player, record.id, record.mutation, record.model, slot)
-	if not placed then
-		return false
-	end
-	WorldBuilder.PlaceOnPedestal(record.model, player, slot)
-	setWalkSpeed(player, NORMAL_SPEED)
-	effect(player, "Buy", root.Position)
-	local delivered = BrainrotData.GetBrainrot(record.id)
-	toast(player, ("Delivered %s to your base!"):format(delivered and delivered.name or "brainrot"))
-	Shop.SendState(player)
 	return true
 end
 
-function Shop.ResetWalkSpeed(player)
-	setWalkSpeed(player, NORMAL_SPEED)
+-- Buy price for a brainrot: scaled from base income, rounded to nearest $100.
+local function buyPrice(baseIncome, rebirths)
+	local base = math.max(100, math.ceil(baseIncome * 20))
+	local scale = 1 + rebirths * 0.75
+	local raw = base * scale
+	return math.round(raw / 100) * 100
 end
 
-function Shop.Init(remotesFolder)
-	remotes = remotesFolder
-	remotes.BuyBrainrot.OnServerEvent:Connect(onBuyBrainrot)
-	remotes.StealBrainrot.OnServerEvent:Connect(onStealBrainrot)
-	remotes.SlapRival.OnServerEvent:Connect(onSlapRival)
-	remotes.LockBase.OnServerEvent:Connect(onLockBase)
-	remotes.Rebirth.OnServerEvent:Connect(onRebirth)
-	remotes.BuyUpgrade.OnServerEvent:Connect(onBuyUpgrade)
+Shop.buyPrice = buyPrice
+
+-- Place an owned brainrot model onto a specific pedestal of the player's base.
+local function placeOnPedestal(model, pedestalIndex)
+	if not worldPlayerBase or not worldPlayerBase.pedestals then
+		return
+	end
+	local ped = worldPlayerBase.pedestals[pedestalIndex]
+	if not ped then
+		return
+	end
+	model:PivotTo(ped.CFrame * CFrame.new(0, 2.4, 0))
+end
+
+Shop.placeOnPedestal = placeOnPedestal
+
+-- Buy a brainrot currently on the belt. Returns (true) or (false, reason).
+function Shop.buyBrainrot(player, beltId, pedestalIndex)
+	local userId = player.UserId
+	local s = GameState.ensure(userId)
+	if freePedestals(userId) <= 0 then
+		return false, "no pedestal"
+	end
+	local beltEntry = Conveyor.ACTIVE[beltId]
+	if not beltEntry then
+		return false, "not on belt"
+	end
+	local price = buyPrice(beltEntry.def.income, s.rebirths)
+	if GameState.getCash(userId) < price then
+		return false, "not enough cash"
+	end
+	-- Find a free pedestal index.
+	local idx = pedestalIndex
+	if not worldPlayerBase or not worldPlayerBase.pedestals[idx] then
+		idx = nil
+		for i = 1, s.pedestals do
+			if Shop.pedestalFree(i) then
+				idx = i
+				break
+			end
+		end
+	end
+	if not idx then
+		return false, "no pedestal"
+	end
+	GameState.addCash(userId, -price)
+	local model = beltEntry.model
+	Conveyor.remove(beltId)
+	model.Parent = worldPlayerBase.model or model.Parent
+	placeOnPedestal(model, idx)
+	OWNED[beltId] = {
+		model = model,
+		def = beltEntry.def,
+		mutation = beltEntry.mutation,
+		income = beltEntry.income,
+		ownerUserId = userId,
+		pedestalIndex = idx,
+	}
+	GameState.claimBrainrot(beltId, userId)
+	Shop.pushHUD(userId)
+	return true
+end
+
+-- Rival-owned brainrots sitting on the rival base (stealable by the player).
+local RIVAL_OWNED = {} -- rivalId -> { model, def, mutation, income }
+
+Shop.RIVAL_OWNED = RIVAL_OWNED
+Shop.rivalNextId = 0
+
+-- When the rival keeps a stolen player brainrot, it lands on the rival base.
+function Shop.rivalKept(id)
+	local e = OWNED[id]
+	if not e then
+		return
+	end
+	-- Move the model off the player's pedestal and onto the rival base.
+	local rivalId = "R" .. tostring(Shop.rivalNextId)
+	Shop.rivalNextId += 1
+	RIVAL_OWNED[rivalId] = {
+		model = e.model,
+		def = e.def,
+		mutation = e.mutation,
+		income = e.income,
+	}
+	OWNED[id] = nil
+	GameState.releaseBrainrot(id)
+	local model = RIVAL_OWNED[rivalId].model
+	model:SetAttribute("BrainrotId", rivalId)
+	model.Parent = worldRivalBase and worldRivalBase.model or WorldBuilder.bases
+	if worldRivalBase then
+		local ped = worldRivalBase.pedestals and worldRivalBase.pedestals[1]
+		if ped then
+			model:PivotTo(ped.CFrame * CFrame.new(0, 2.4, 0))
+		end
+	end
+	-- Notify all players of the steal so the HUD updates.
+	for _, p in ipairs(Players:GetPlayers()) do
+		Shop.pushHUD(p.UserId)
+	end
+end
+
+-- Player-side carrying state: a player is carrying a rival brainrot back home.
+local PLAYER_CARRY = {} -- userId -> { model, rivalId, def, mutation, income }
+
+Shop.PLAYER_CARRY = PLAYER_CARRY
+
+-- Steal a brainrot off the rival base. Validates the player is not already
+-- carrying and the target exists. Returns (true) or (false, reason).
+function Shop.stealBrainrot(player, rivalId)
+	local userId = player.UserId
+	if PLAYER_CARRY[userId] then
+		return false, "already carrying"
+	end
+	local rivalEntry = RIVAL_OWNED[rivalId]
+	if not rivalEntry then
+		return false, "not there"
+	end
+	-- Physically attach the model to the player's character (carried overhead).
+	local char = player.Character
+	local carryModel = rivalEntry.model
+	RIVAL_OWNED[rivalId] = nil
+	PLAYER_CARRY[userId] = {
+		model = carryModel,
+		rivalId = rivalId,
+		def = rivalEntry.def,
+		mutation = rivalEntry.mutation,
+		income = rivalEntry.income,
+	}
+	if char and carryModel then
+		local head = char:FindFirstChild("Head")
+		carryModel.Parent = char
+		carryModel:PivotTo((head or char:GetPivot()).CFrame * CFrame.new(0, 2, 0))
+	end
+	Shop.pushHUD(userId)
+	if onStealChanged then
+		onStealChanged(userId, true)
+	end
+	return true
+end
+
+-- Complete the steal: place the carried brainrot on a free player pedestal.
+-- Returns true on success. Called by the client when the player reaches home.
+function Shop.completeSteal(player)
+	local userId = player.UserId
+	local carry = PLAYER_CARRY[userId]
+	if not carry then
+		return false
+	end
+	if freePedestals(userId) <= 0 then
+		return false
+	end
+	local idx = nil
+	for i = 1, GameState.get(userId).pedestals do
+		if Shop.pedestalFree(i) then
+			idx = i
+			break
+		end
+	end
+	if not idx then
+		return false
+	end
+	-- Adopt the carried model as an owned brainrot.
+	PLAYER_CARRY[userId] = nil
+	local model = carry.model
+	if model then
+		model.Parent = worldPlayerBase.model
+		placeOnPedestal(model, idx)
+	end
+	local newId = carry.rivalId
+	OWNED[newId] = {
+		model = model,
+		def = carry.def,
+		mutation = carry.mutation,
+		income = carry.income,
+		ownerUserId = userId,
+		pedestalIndex = idx,
+	}
+	GameState.claimBrainrot(newId, userId)
+	if onStealChanged then
+		onStealChanged(userId, false)
+	end
+	Shop.pushHUD(userId)
+	return true
+end
+
+-- Cancel the steal cleanly: return the carried model to the rival base so
+-- nothing is lost and the player is never left stuck carrying nothing.
+function Shop.cancelSteal(player)
+	local userId = player.UserId
+	local carry = PLAYER_CARRY[userId]
+	if not carry then
+		return
+	end
+	PLAYER_CARRY[userId] = nil
+	local model = carry.model
+	if model then
+		local rivalId = "R" .. tostring(Shop.rivalNextId)
+		Shop.rivalNextId += 1
+		model:SetAttribute("BrainrotId", rivalId)
+		RIVAL_OWNED[rivalId] = {
+			model = model,
+			def = carry.def,
+			mutation = carry.mutation,
+			income = carry.income,
+		}
+		model.Parent = worldRivalBase and worldRivalBase.model or WorldBuilder.bases
+		if worldRivalBase then
+			local ped = worldRivalBase.pedestals and worldRivalBase.pedestals[1]
+			if ped then
+				model:PivotTo(ped.CFrame * CFrame.new(0, 2.4, 0))
+			end
+		end
+	end
+	if onStealChanged then
+		onStealChanged(userId, false)
+	end
+end
+
+Shop.isCarrying = function(userId)
+	return PLAYER_CARRY[userId] ~= nil
+end
+
+-- Lock the player's base so the rival cannot steal. Respects cooldown.
+function Shop.lockBase(player)
+	local userId = player.UserId
+	local s = GameState.ensure(userId)
+	local now = os.clock()
+	if now < s.lockReadyAt then
+		return false, "cooldown"
+	end
+	s.lockUntil = now + Shop.cfg.lockDuration
+	s.lockReadyAt = now + Shop.cfg.lockCooldown
+	Shop.pushHUD(userId)
+	return true
+end
+
+-- Is the player's base currently locked? (Used by the rival.)
+function Shop.isLockedForRival()
+	local now = os.clock()
+	for _, p in ipairs(Players:GetPlayers()) do
+		local s = GameState.get(p.UserId)
+		if s and now < s.lockUntil then
+			return true
+		end
+	end
+	return false
+end
+
+-- Slap the rival. Validates the player is within range.
+function Shop.slapRival(player)
+	local char = player.Character
+	if not char then
+		return false, "no character"
+	end
+	local rivalModel = game.Workspace:FindFirstChild("World") and game.Workspace.World:FindFirstChild("Rival")
+	if not rivalModel then
+		return false, "no rival"
+	end
+	local dist = (char:GetPivot().Position - rivalModel:GetPivot().Position).Magnitude
+	if dist > 12 then
+		return false, "too far"
+	end
+	local Rival = require(script.Parent.Rival)
+	Rival.slap(char:GetPivot().Position, 6)
+	return true
+end
+
+-- Rebirth: spend cash plus owned brainrots to reset and gain +50% income.
+function Shop.rebirth(player)
+	local userId = player.UserId
+	local s = GameState.ensure(userId)
+	local ownedCount = Shop.countOwned(userId)
+	if ownedCount <= 0 then
+		return false, "need brainrots"
+	end
+	local cashCost = math.round(5000 * (1 + s.rebirths * 1.75))
+	if GameState.getCash(userId) < cashCost then
+		return false, "not enough cash"
+	end
+	GameState.setCash(userId, 0)
+	-- Clear all owned brainrots (despawn models).
+	for id, e in pairs(OWNED) do
+		if e.ownerUserId == userId then
+			if e.model then
+				e.model:Destroy()
+			end
+			OWNED[id] = nil
+			GameState.releaseBrainrot(id)
+		end
+	end
+	s.rebirths += 1
+	local titles = BrainrotData.titles
+	s.title = titles[math.min(s.rebirths + 1, #titles)]
+	Shop.pushHUD(userId)
+	return true
+end
+
+-- Buy an upgrade: "pedestal" | "conveyor" | "income".
+function Shop.buyUpgrade(player, kind)
+	local userId = player.UserId
+	local s = GameState.ensure(userId)
+	local cfg = Shop.cfg
+	local cost = 0
+	if kind == "pedestal" then
+		if s.pedestals >= cfg.pedestalMax then
+			return false, "max"
+		end
+		cost = math.round((s.pedestals) * cfg.pedestalCostStep / 100) * 100
+		if GameState.getCash(userId) < cost then
+			return false, "not enough cash"
+		end
+		GameState.addCash(userId, -cost)
+		s.pedestals += 1
+	elseif kind == "conveyor" then
+		cost = math.round((s.conveyorLevel) * 500 / 100) * 100
+		if GameState.getCash(userId) < cost then
+			return false, "not enough cash"
+		end
+		GameState.addCash(userId, -cost)
+		s.conveyorLevel += 1
+		Conveyor.configure({ interval = math.max(2, cfg.spawnInterval * (0.9 ^ (s.conveyorLevel - 1))) })
+	elseif kind == "income" then
+		cost = math.round((s.incomeLevel) * 300 / 100) * 100
+		if GameState.getCash(userId) < cost then
+			return false, "not enough cash"
+		end
+		GameState.addCash(userId, -cost)
+		s.incomeLevel += 1
+	else
+		return false, "unknown"
+	end
+	Shop.pushHUD(userId)
+	return true, cost
+end
+
+-- Let init.server register callbacks for income/steal changes.
+function Shop.registerCallbacks(cbs)
+	onIncomeChanged = cbs.onIncomeChanged
+	onStealChanged = cbs.onStealChanged
 end
 
 return Shop

@@ -1,5 +1,14 @@
+# Output / build artifacts
 out/
-out1/
 out2/
-verify-out*/
+
+# Screenshot render temp scene
+.scene.tmp.json
+
+# Node
 node_modules/
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo

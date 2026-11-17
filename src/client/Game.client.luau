@@ -1,189 +1,189 @@
--- Game.client: the client entry point. The 3D world is the game (default
--- Roblox third-person camera, WASD to move); this script only builds the
--- HUD, binds the keys, finds what the player can interact with nearby, and
--- talks to the server through the BrainrotRemotes. The server validates
--- every request — the client never decides a purchase, a steal or a slap.
--- Keys are bound with ContextActionService (Roblox's camera eats raw
--- arrow-key input; E/Q/L/C are free).
+-- Game.client.luau
+-- Client entry: builds the HUD, binds keys (E buy/steal, Q slap, L lock) via
+-- ContextActionService, and handles the server's RemoteEvents. WASD + Space is
+-- default Roblox movement; the camera stays default third-person.
 
-local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ContextActionService = game:GetService("ContextActionService")
 local UserInputService = game:GetService("UserInputService")
-local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
-local Effects = require(script.Parent.Effects)
-local HUD = require(script.Parent.HUD)
 
-local remotes = ReplicatedStorage:WaitForChild("BrainrotRemotes")
-HUD.Build(remotes)
+local HUD = require(script.HUD)
+local Effects = require(script.Effects)
 
-local INTERACT_RANGE = 12
-local SLAP_RANGE = 14
+local REMOTE_FOLDER = ReplicatedStorage:WaitForChild("RemoteEvents")
 
-local lastState = nil
-local currentTarget = nil -- { kind = "Buy" | "Steal", model = Instance }
-
-local function getRoot()
-	local character = player.Character
-	return character and character:FindFirstChild("HumanoidRootPart")
+local function remote(name)
+	return REMOTE_FOLDER:WaitForChild(name)
 end
 
-remotes.StateUpdate.OnClientEvent:Connect(function(payload)
-	if typeof(payload) ~= "table" then
-		return
-	end
-	if payload.type == "State" then
-		lastState = payload
-		HUD.SetState(payload)
-	elseif payload.type == "Toast" then
-		HUD.ShowToast(payload.text)
-	elseif payload.type == "Banner" then
-		HUD.ShowBanner(payload.text, payload.duration)
-	elseif payload.type == "Effect" then
-		Effects.Burst(payload.kind, payload.position)
-		if payload.kind == "Golden" then
-			Effects.GoldenFlash(HUD.GetGui())
-		end
-	end
-end)
+local buyRemote = remote("BuyBrainrot")
+local stealRemote = remote("StealBrainrot")
+local slapRemote = remote("SlapRival")
+local lockRemote = remote("LockBase")
+local rebirthRemote = remote("Rebirth")
+local upgradeRemote = remote("BuyUpgrade")
+local hudRemote = remote("HUDUpdate")
+local bannerRemote = remote("EventBanner")
+local resultRemote = remote("ActionResult")
 
-local function nearestModel(root, kinds)
-	local world = Workspace:FindFirstChild("BrainrotWorld")
-	if not world then
-		return nil
-	end
-	local nearest = nil
-	local nearestDistance = INTERACT_RANGE
-	for _, child in ipairs(world:GetChildren()) do
-		if child:IsA("Model") and kinds[child:GetAttribute("Kind")] then
-			local part = child.PrimaryPart
-			if part then
-				local distance = (part.Position - root.Position).Magnitude
-				if distance <= nearestDistance then
-					nearest = child
-					nearestDistance = distance
-				end
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "HUD"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = player:WaitForChild("PlayerGui")
+
+-- Shared brainrot catalog (for the collection panel).
+local GameData = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("GameData"))
+
+-- Pick the nearest brainrot of a given folder.
+local function nearestModel(folder, predicate)
+	local best = nil
+	local bestDist = math.huge
+	local origin = player.Character and player.Character:GetPivot().Position or Vector3.new()
+	for _, model in ipairs(folder:GetChildren()) do
+		if predicate(model) then
+			local dist = (model:GetPivot().Position - origin).Magnitude
+			if dist < bestDist then
+				bestDist = dist
+				best = model
 			end
 		end
 	end
-	return nearest
+	return best, bestDist
 end
 
-local function refreshPrompt()
-	local root = getRoot()
-	if not root then
-		HUD.SetPrompt("")
-		currentTarget = nil
-		return
-	end
-	if lastState and lastState.carrying then
-		local free = (lastState.pedestals or 0) - (lastState.ownedCount or 0)
-		if free > 0 then
-			HUD.SetPrompt("Carrying a brainrot - run onto YOUR base to deliver it!")
-		else
-			HUD.SetPrompt("Carrying - but no free pedestal! Buy one in the Shop.")
-		end
-		currentTarget = nil
-		return
-	end
-	local buyTarget = nearestModel(root, { Conveyor = true })
-	if buyTarget then
-		currentTarget = { kind = "Buy", model = buyTarget }
-		local name = buyTarget:GetAttribute("BrainrotName") or "Brainrot"
-		local price = buyTarget:GetAttribute("Price") or 0
-		local rarity = buyTarget:GetAttribute("Rarity") or ""
-		HUD.SetPrompt(("Press E to buy %s - $%d (%s)"):format(name, price, rarity))
-		return
-	end
-	local stealTarget = nearestModel(root, { RivalOwned = true, Dropped = true })
-	if stealTarget then
-		currentTarget = { kind = "Steal", model = stealTarget }
-		local name = stealTarget:GetAttribute("BrainrotName") or "Brainrot"
-		if stealTarget:GetAttribute("CanCollect") then
-			HUD.SetPrompt(("Press E to pick up %s!"):format(name))
-		else
-			HUD.SetPrompt(("Press E to STEAL %s from the rival!"):format(name))
-		end
-		return
-	end
-	currentTarget = nil
-	local rival = Workspace:FindFirstChild("BrainrotWorld") and Workspace.BrainrotWorld:FindFirstChild("RivalBot")
-	local rivalRoot = rival and rival.PrimaryPart
-	if rivalRoot and (rivalRoot.Position - root.Position).Magnitude <= SLAP_RANGE then
-		HUD.SetPrompt("Press Q to SLAP the rival!")
-		return
-	end
-	HUD.SetPrompt("")
+-- Build the HUD (top bar + buttons + collection panel).
+HUD.build(ScreenGui)
+HUD.buildButtons()
+HUD.buildCollection(GameData.rarities, GameData.brainrots)
+
+local World = workspace:WaitForChild("World")
+local BeltFolder = World:WaitForChild("Conveyor")
+local BasesFolder = World:WaitForChild("Bases")
+
+-- Track whether the player is currently carrying a stolen brainrot.
+local carrying = false
+
+local function beltBrainrot(model)
+	return model:FindFirstChild("Head") ~= nil and not model:GetAttribute("IsRival") and not model:GetAttribute("Carried")
 end
 
-task.spawn(function()
-	while true do
-		task.wait(0.2)
-		pcall(refreshPrompt)
+-- The nearest belt brainrot within buy range.
+local function findBeltTarget(range)
+	local model, dist = nearestModel(BeltFolder, beltBrainrot)
+	if dist <= range then
+		return model
+	end
+	return nil
+end
+
+-- The nearest rival-base brainrot within steal range.
+local function findRivalTarget(range)
+	local base = BasesFolder:FindFirstChild("RivalBase")
+	if not base then
+		return nil
+	end
+	local model, dist = nearestModel(base, beltBrainrot)
+	if dist <= range then
+		return model, dist
+	end
+	return nil
+end
+
+-- Press E: buy a nearby belt brainrot, or steal one from the rival base.
+local function onE()
+	local char = player.Character
+	if not char then
+		return
+	end
+	local target = findBeltTarget(8)
+	if target then
+		local id = target:GetAttribute("BrainrotId")
+		if id then
+			buyRemote:FireServer(id, 1)
+			Effects.buy(target:GetPivot().Position, target.Head.Color)
+		end
+		return
+	end
+	local rivalModel, dist = findRivalTarget(8)
+	if rivalModel and not carrying then
+		local id = rivalModel:GetAttribute("BrainrotId")
+		if id then
+			stealRemote:FireServer(id)
+		end
+	end
+end
+
+-- Press Q: slap the rival.
+local function onQ()
+	slapRemote:FireServer()
+end
+
+-- Press L: lock the base.
+local function onL()
+	lockRemote:FireServer()
+end
+
+ContextActionService:BindAction("BuyOrSteal", function(_, state)
+	if state == Enum.UserInputState.Begin then
+		onE()
+	end
+	return Enum.ContextActionResult.Sink
+end, false, Enum.KeyCode.E)
+
+ContextActionService:BindAction("Slap", function(_, state)
+	if state == Enum.UserInputState.Begin then
+		onQ()
+	end
+	return Enum.ContextActionResult.Sink
+end, false, Enum.KeyCode.Q)
+
+ContextActionService:BindAction("Lock", function(_, state)
+	if state == Enum.UserInputState.Begin then
+		onL()
+	end
+	return Enum.ContextActionResult.Sink
+end, false, Enum.KeyCode.L)
+
+HUD.callbacks.onLock = onL
+
+-- ---------------------------------------------------------------- server events
+
+-- Local snapshot of the HUD state pushed by the server.
+local hudState = { cash = 0, income = 0, mult = 1, rebirths = 0, title = "Noob", lockReadyAt = 0, lockUntil = 0 }
+
+hudRemote.OnClientEvent:Connect(function(cash, income, mult, rebirths, title, pedestals, lockUntil, lockReadyAt)
+	hudState.cash = cash
+	hudState.income = income
+	hudState.mult = mult
+	hudState.rebirths = rebirths
+	hudState.title = title or hudState.title
+	hudState.lockUntil = lockUntil or 0
+	hudState.lockReadyAt = lockReadyAt or 0
+	HUD.updateCash(cash)
+	HUD.updateIncome(income, mult)
+	HUD.updateRebirth(rebirths, title or hudState.title)
+end)
+
+bannerRemote.OnClientEvent:Connect(function(text)
+	HUD.showBanner(text)
+	Effects.fanfare(player.Character and player.Character:GetPivot().Position or Vector3.new())
+end)
+
+-- ActionResult: let the player know a request failed.
+resultRemote.OnClientEvent:Connect(function(actionName, success, detail)
+	if not success and detail then
+		HUD.showBanner(actionName .. ": " .. tostring(detail))
 	end
 end)
 
-local function onInteract(_, inputState)
-	if inputState ~= Enum.UserInputState.Begin then
-		return
-	end
-	if not currentTarget then
-		return
-	end
-	if currentTarget.kind == "Buy" then
-		remotes.BuyBrainrot:FireServer(currentTarget.model)
-	elseif currentTarget.kind == "Steal" then
-		remotes.StealBrainrot:FireServer(currentTarget.model)
-	end
-end
-
-local function onSlap(_, inputState)
-	if inputState ~= Enum.UserInputState.Begin then
-		return
-	end
-	remotes.SlapRival:FireServer()
-end
-
-local function onLock(_, inputState)
-	if inputState ~= Enum.UserInputState.Begin then
-		return
-	end
-	remotes.LockBase:FireServer()
-end
-
-local function onCollection(_, inputState)
-	if inputState ~= Enum.UserInputState.Begin then
-		return
-	end
-	HUD.ToggleCollection()
-end
-
-ContextActionService:BindAction("BrainrotInteract", onInteract, false, Enum.KeyCode.E)
-ContextActionService:BindAction("BrainrotSlap", onSlap, false, Enum.KeyCode.Q)
-ContextActionService:BindAction("BrainrotLock", onLock, false, Enum.KeyCode.L)
-ContextActionService:BindAction("BrainrotCollection", onCollection, false, Enum.KeyCode.C)
-
--- Clicking anywhere (not on a HUD button) also slaps when the rival is in
--- range, so mouse players get the same defence as keyboard players.
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then
-		return
-	end
-	if input.UserInputType ~= Enum.UserInputType.MouseButton1 then
-		return
-	end
-	local root = getRoot()
-	if not root then
-		return
-	end
-	local world = Workspace:FindFirstChild("BrainrotWorld")
-	local rival = world and world:FindFirstChild("RivalBot")
-	local rivalRoot = rival and rival.PrimaryPart
-	if rivalRoot and (rivalRoot.Position - root.Position).Magnitude <= SLAP_RANGE then
-		remotes.SlapRival:FireServer()
-	end
+-- Tick the lock button's cooldown each frame.
+RunService.Heartbeat:Connect(function()
+	local lockReady = os.clock() >= (hudState.lockReadyAt or 0)
+	HUD.updateLock(hudState.lockReadyAt - os.clock(), lockReady)
 end)
 
-print("[Brainrot Base Wars] client ready - E interact, Q slap, L lock, C collection")
+return { }
