@@ -290,7 +290,10 @@ function GameState.GetUpgradeCost(state, upgradeType)
 		if state.incomeUpgrade >= 2.25 then
 			return nil
 		end
-		return math.floor(8000 * (2 ^ (state.incomeUpgrade - 1)))
+		-- Round to the nearest $100: the raw 2^(x-1) curve lands on odd
+		-- figures ($9,514, $11,313...) that read as bugs in the HUD.
+		local raw = 8000 * (2 ^ (state.incomeUpgrade - 1))
+		return math.floor(raw / 100 + 0.5) * 100
 	end
 	return nil
 end
@@ -323,7 +326,10 @@ end
 function GameState.GetRebirthRequirements(player)
 	local state = GameState.Get(player)
 	local rebirths = state and state.rebirths or 0
-	return 3 + rebirths, math.floor(25000 * (2 ^ rebirths))
+	-- Cash need grows 1.75x per rebirth (was 2x): income only grows 1.5x
+	-- per rebirth, so the old curve made each rebirth strictly harder
+	-- than the last and priced late rebirths out of reach.
+	return 3 + rebirths, math.floor(25000 * (1.75 ^ rebirths))
 end
 
 function GameState.CanRebirth(player)

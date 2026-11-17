@@ -77,6 +77,11 @@ function Shop.BuildStatePayload(player)
 			Conveyor = GameState.GetUpgradeCost(state, "Conveyor"),
 			Income = GameState.GetUpgradeCost(state, "Income"),
 		},
+		upgradeLevels = {
+			Pedestal = state.pedestals,
+			Conveyor = state.conveyorLevel,
+			Income = state.incomeUpgrade,
+		},
 		rebirthNeed = (function()
 			local count, cash = GameState.GetRebirthRequirements(player)
 			return { count = count, cash = cash }
@@ -156,6 +161,14 @@ local function onStealBrainrot(player, model)
 	local position = modelPosition(model)
 	if not withinRange(player, position, INTERACT_RANGE) then
 		toast(player, "Too far away!")
+		return
+	end
+	-- No free pedestal: refuse the steal BEFORE taking anything. The old
+	-- code let the player pick up a brainrot they could never deliver, so
+	-- they were stuck carrying it at speed 10 with no way out except
+	-- rebirth or death.
+	if not GameState.GetFreeSlot(player) then
+		toast(player, "No free pedestal! Buy one in the Shop first.")
 		return
 	end
 	local record
@@ -298,7 +311,8 @@ function Shop.TryDeliver(player)
 	WorldBuilder.PlaceOnPedestal(record.model, player, slot)
 	setWalkSpeed(player, NORMAL_SPEED)
 	effect(player, "Buy", root.Position)
-	toast(player, ("Delivered %s to your base!"):format(BrainrotData.GetBrainrot(record.id).name))
+	local delivered = BrainrotData.GetBrainrot(record.id)
+	toast(player, ("Delivered %s to your base!"):format(delivered and delivered.name or "brainrot"))
 	Shop.SendState(player)
 	return true
 end

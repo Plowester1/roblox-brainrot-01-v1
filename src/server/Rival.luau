@@ -64,7 +64,15 @@ local function chooseVictim()
 		targetPlayer = nil
 		return
 	end
-	local record = owned[math.random(1, #owned)]
+	-- The rival hunts the highest-income brainrot, not a random one:
+	-- protecting your best earner (lock / slap) is now a real decision
+	-- instead of the rival mostly grabbing a cheap Common.
+	local record = owned[1]
+	for _, candidate in ipairs(owned) do
+		if (candidate.income or 0) > (record.income or 0) then
+			record = candidate
+		end
+	end
 	targetModel = record.model
 	if targetModel and targetModel.PrimaryPart then
 		destination = targetModel.PrimaryPart.Position

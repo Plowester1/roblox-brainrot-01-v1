@@ -39,7 +39,9 @@ local function spawnBrainrot(minimumRarityIndex, forcedMutation)
 	local mutation = forcedMutation or BrainrotData.ChooseMutation().name
 	local model = WorldBuilder.CreateBrainrot(brainrot, mutation, "Conveyor")
 	local lane = BrainrotData.World.conveyorStart
-	local x = lane.X + math.random() * 4.8 - 2.4
+	-- Spread spawns across most of the 12-wide belt (was a 4.8-stud
+	-- cluster in the middle, so the belt always looked the same).
+	local x = lane.X + math.random() * 9 - 4.5
 	model:PivotTo(CFrame.new(x, lane.Y, lane.Z))
 	model:SetAttribute("WalkPhase", math.random() * math.pi * 2)
 	table.insert(spawned, model)
@@ -131,6 +133,11 @@ function Conveyor.Start()
 					local bob = math.abs(math.sin(phase)) * 0.08
 					model:PivotTo(CFrame.new(root.Position.X, lane.Y + bob, nextZ) * CFrame.Angles(0, math.rad(180), 0))
 				end
+			else
+				-- PrimaryPart gone (model destroyed out from under us):
+				-- drop it from the list instead of tracking a dead model.
+				removeFromList(model)
+				model:Destroy()
 			end
 		end
 	end)

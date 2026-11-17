@@ -30,8 +30,8 @@
     { "name": "Epic", "color": [0.63, 0.25, 0.96], "weight": 13, "income": 12 },
     { "name": "Legendary", "color": [1, 0.58, 0.08], "weight": 7, "income": 40 },
     { "name": "Mythic", "color": [1, 0.12, 0.56], "weight": 3.5, "income": 140 },
-    { "name": "Brainrot God", "color": [0.10, 0.95, 0.92], "weight": 1.4, "income": 520 },
-    { "name": "Secret", "color": [0.08, 0.06, 0.12], "weight": 0.1, "income": 2200 }
+    { "name": "Brainrot God", "color": [0.10, 0.95, 0.92], "weight": 2.0, "income": 520 },
+    { "name": "Secret", "color": [0.08, 0.06, 0.12], "weight": 0.3, "income": 2200 }
   ],
   "mutations": [
     { "name": "None", "multiplier": 1, "color": [1, 1, 1], "weight": 1000 },

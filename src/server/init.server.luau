@@ -49,6 +49,7 @@ Players.PlayerRemoving:Connect(function(player)
 	end
 	WorldBuilder.ClearCarried(player)
 	GameState.Remove(player)
+	WorldBuilder.RemovePlayerPedestals(player)
 end)
 
 -- Income loop: every second each player earns their total $/s, gets a fresh

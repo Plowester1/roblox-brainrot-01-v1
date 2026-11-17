@@ -19,6 +19,7 @@ local gui = nil
 local labels = {}
 local panels = {}
 local rows = {}
+local rowPrices = {}
 
 local function formatMoney(amount)
 	local text = tostring(math.floor(amount or 0))
@@ -135,7 +136,9 @@ local function buildTopBar()
 	labels.shopButton = makeButton(bar, "ShopButton", UDim2.fromOffset(824, 10), UDim2.fromOffset(84, 44), "SHOP", Color3.fromRGB(255, 160, 53))
 	labels.collectionButton = makeButton(bar, "CollectionButton", UDim2.fromOffset(918, 10), UDim2.fromOffset(128, 44), "COLLECTION [C]", Color3.fromRGB(203, 87, 255))
 	labels.rebirthButton = makeButton(bar, "RebirthButton", UDim2.fromOffset(1056, 10), UDim2.fromOffset(150, 44), "REBIRTH", Color3.fromRGB(49, 211, 165))
-	labels.title = makeLabel(bar, "Title", UDim2.new(1, -210, 0, 18), UDim2.fromOffset(200, 28), 13, Color3.fromRGB(255, 240, 126), Enum.Font.GothamBlack)
+	-- Title lives bottom-right, not in the top bar: at 1280px wide the old
+	-- spot (x 1070..1270) sat on top of the REBIRTH button (1056..1206).
+	labels.title = makeLabel(gui, "Title", UDim2.new(1, -220, 1, -30), UDim2.fromOffset(200, 22), 13, Color3.fromRGB(255, 240, 126), Enum.Font.GothamBlack)
 	labels.title.TextXAlignment = Enum.TextXAlignment.Right
 	labels.title.Text = "BRAINROT BASE WARS"
 end
@@ -242,6 +245,7 @@ local function buildCollectionPanel()
 			ownedLabel.TextXAlignment = Enum.TextXAlignment.Right
 			ownedLabel.Text = formatMoney(brainrot.price)
 			rows[brainrot.id] = ownedLabel
+			rowPrices[brainrot.id] = brainrot.price
 		end
 	end
 
@@ -249,13 +253,16 @@ local function buildCollectionPanel()
 	local ladder = makeLabel(panel, "Ladder", UDim2.fromOffset(20, 0), UDim2.fromOffset(680, 16), 11, Color3.fromRGB(148, 161, 201))
 	ladder.Position = UDim2.new(0, 20, 1, -24)
 	if gameData then
-		local parts = {}
+		-- Percentages are computed from the total weight, not assumed to
+		-- sum to 100: the rarity rebalance moved the total to 100.8.
+		local totalWeight = 0
 		for _, rarity in ipairs(gameData.rarities) do
-			-- Weights sum to 100, so each weight IS its spawn percent.
-			local weightText = rarity.weight == math.floor(rarity.weight)
-				and tostring(rarity.weight)
-				or ("%.1f"):format(rarity.weight)
-			table.insert(parts, ("%s %s%%"):format(rarity.name, weightText))
+			totalWeight += rarity.weight
+		end
+		for _, rarity in ipairs(gameData.rarities) do
+			local pct = rarity.weight / totalWeight * 100
+			local pctText = pct == math.floor(pct) and tostring(pct) or ("%.1f"):format(pct)
+			table.insert(parts, ("%s %s%%"):format(rarity.name, pctText))
 		end
 		ladder.Text = "Rarity weights (of spawns): " .. table.concat(parts, "  -  ")
 	else
@@ -279,6 +286,7 @@ local function buildShopPanel()
 		{ key = "Income", title = "Income Boost", desc = "+25% income multiplier" },
 	}
 	labels.upgradeButtons = {}
+	labels.upgradeDescs = {}
 	for index, upgrade in ipairs(upgrades) do
 		local y = 60 + (index - 1) * 96
 		local row = Instance.new("Frame")
@@ -291,7 +299,9 @@ local function buildShopPanel()
 		rowCorner.CornerRadius = UDim.new(0, 10)
 		rowCorner.Parent = row
 		makeLabel(row, "Title", UDim2.fromOffset(14, 10), UDim2.fromOffset(240, 20), 15, Color3.fromRGB(240, 242, 255)).Text = upgrade.title
-		makeLabel(row, "Desc", UDim2.fromOffset(14, 34), UDim2.fromOffset(240, 34), 12, Color3.fromRGB(148, 161, 201)).Text = upgrade.desc
+		local desc = makeLabel(row, "Desc", UDim2.fromOffset(14, 34), UDim2.fromOffset(240, 34), 12, Color3.fromRGB(148, 161, 201))
+		desc.Text = upgrade.desc
+		labels.upgradeDescs[upgrade.key] = desc
 		local buy = makeButton(row, "Buy", UDim2.new(1, -130, 0, 20), UDim2.fromOffset(116, 44), "BUY", Color3.fromRGB(49, 211, 165))
 		buy.MouseButton1Click:Connect(function()
 			if remotes and remotes.BuyUpgrade then
@@ -305,7 +315,11 @@ end
 function HUD.SetState(payload)
 	state = payload
 	labels.cash.Text = formatMoney(payload.cash)
-	labels.income.Text = ("$%d/s"):format(payload.income)
+	if payload.goldenRemaining and payload.goldenRemaining > 0 then
+		labels.income.Text = ("$%d/s  ★GOLDEN %ds"):format(payload.income, payload.goldenRemaining)
+	else
+		labels.income.Text = ("$%d/s"):format(payload.income)
+	end
 	labels.rebirth.Text = ("%d  x%.1f"):format(payload.rebirths, payload.multiplier)
 	if payload.lockRemaining and payload.lockRemaining > 0 then
 		labels.lockButton.Text = ("LOCKED %ds"):format(payload.lockRemaining)
@@ -326,6 +340,21 @@ function HUD.SetState(payload)
 			button.Text = cost and formatMoney(cost) or "MAX"
 		end
 	end
+	-- Shop rows used to show only a static description: a player could not
+	-- tell what level an upgrade was at. Show the live level next to it.
+	if payload.upgradeLevels then
+		local levels = payload.upgradeLevels
+		local descs = labels.upgradeDescs or {}
+		if descs.Pedestal then
+			descs.Pedestal.Text = ("One more base slot — have %d/12"):format(levels.Pedestal or 6)
+		end
+		if descs.Conveyor then
+			descs.Conveyor.Text = ("Brainrots spawn more often — Lv %d/5"):format(levels.Conveyor or 0)
+		end
+		if descs.Income then
+			descs.Income.Text = ("+25% income multiplier — now x%.2f"):format(levels.Income or 1)
+		end
+	end
 	if payload.ownedIds then
 		local owned = {}
 		for _, id in ipairs(payload.ownedIds) do
@@ -335,6 +364,12 @@ function HUD.SetState(payload)
 			if owned[id] then
 				label.Text = "OWNED"
 				label.TextColor3 = Color3.fromRGB(103, 235, 165)
+			else
+				-- Rows used to stay "OWNED" forever once bought: a brainrot
+				-- stolen by the rival (or cleared by a rebirth) still showed
+				-- as owned. Reset non-owned rows to their price.
+				label.Text = formatMoney(rowPrices[id] or 0)
+				label.TextColor3 = Color3.fromRGB(238, 224, 144)
 			end
 		end
 		labels.collectionCount.Text = ("%d OWNED  /  %d PEDESTALS"):format(payload.ownedCount or 0, payload.pedestals or 0)

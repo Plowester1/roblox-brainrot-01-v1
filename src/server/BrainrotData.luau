@@ -6,8 +6,12 @@ local rarities = {
 	{name = "Epic", color = Color3.fromRGB(183, 73, 255), weight = 13, income = 12},
 	{name = "Legendary", color = Color3.fromRGB(255, 169, 38), weight = 7, income = 40},
 	{name = "Mythic", color = Color3.fromRGB(255, 55, 153), weight = 3.5, income = 140},
-	{name = "Brainrot God", color = Color3.fromRGB(45, 244, 232), weight = 1.4, income = 520},
-	{name = "Secret", color = Color3.fromRGB(83, 54, 128), weight = 0.1, income = 2200},
+	-- Brainrot God 1.4 -> 2.0 and Secret 0.1 -> 0.3: at 0.1% a Secret
+	-- spawned about once per 87 minutes of continuous play, so the rarest
+	-- content was effectively invisible inside a session. Still rare,
+	-- now actually attainable.
+	{name = "Brainrot God", color = Color3.fromRGB(45, 244, 232), weight = 2.0, income = 520},
+	{name = "Secret", color = Color3.fromRGB(83, 54, 128), weight = 0.3, income = 2200},
 }
 
 local mutations = {

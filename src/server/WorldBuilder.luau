@@ -329,6 +329,22 @@ function WorldBuilder.SetPedestalCount(player, count)
 	end
 end
 
+function WorldBuilder.RemovePlayerPedestals(player)
+	-- A leaving player's pedestals used to stay in the world forever:
+	-- PlayerRemoving destroyed their brainrots but never these parts, so
+	-- every departed player left 6-12 marble slabs on their base.
+	local pedestals = playerPedestals[player]
+	if not pedestals then
+		return
+	end
+	for _, pedestal in pairs(pedestals) do
+		if pedestal then
+			pedestal:Destroy()
+		end
+	end
+	playerPedestals[player] = nil
+end
+
 function WorldBuilder.GetPedestalPosition(player, slot)
 	return BrainrotData.World.playerSlots[slot]
 end
@@ -412,6 +428,14 @@ function WorldBuilder.CreateDropped(record, position)
 	local model = WorldBuilder.CreateBrainrot(brainrot, record.mutation, "Dropped")
 	model:SetAttribute("CanCollect", true)
 	model:PivotTo(CFrame.new(position))
+	-- A dropped brainrot nobody picks up used to sit in the world forever
+	-- (slap drops, full-rival-base drops). Despawn after 60s so the arena
+	-- never fills with stale pickups.
+	task.delay(60, function()
+		if model.Parent and model:GetAttribute("CanCollect") then
+			model:Destroy()
+		end
+	end)
 	return model
 end
 

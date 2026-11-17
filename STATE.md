@@ -114,6 +114,63 @@ the coordinator does the GitHub push + submit.
 - .makefun/owner.json untouched (poler wallet FcdRcTG3QNRUFVqUm61wSxuxGQZ7jD1RpPhmZniY9fU7).
 - No secrets in the repo; no real-money spending.
 
+## Polish pass 2 — re-record build (2026-11-18 ~04:40 WIB, Muse, recording 01a1eb72)
+
+The previous recording (01a1eb59) was sealed on the site but its local receipt was
+lost when the record process was interrupted, so the submit was refused. A new
+recording (01a1eb72-f502-73e8-af88-7474f397a720) is running; this session started
+after it. Genuine revision pass, not cosmetics — real bugs, balance and UX fixes:
+
+- `Shop.luau` — Steal soft-lock fixed: stealing/picking up with no free pedestal
+  is now refused BEFORE taking anything (was: player stuck carrying forever at
+  speed 10 with no way to deliver). TryDeliver's toast no longer indexes a
+  possibly-nil brainrot. State payload now also sends `upgradeLevels`.
+- `GameState.luau` — Income upgrade costs rounded to the nearest $100 (the raw
+  2^(x-1) curve produced $9,514 / $11,313 in the HUD). Rebirth cash scaling
+  2x -> 1.75x per rebirth (income only grows 1.5x, so the old curve made each
+  rebirth strictly harder than the last).
+- `WorldBuilder.luau` — NEW `RemovePlayerPedestals(player)`: a leaving player's
+  pedestal parts were never destroyed, so every departed player left 6-12
+  marble slabs on their base. Dropped pickups now despawn after 60s if still
+  uncollected (slap/full-base drops used to sit in the world forever).
+- `init.server.luau` — PlayerRemoving now calls `RemovePlayerPedestals`.
+- `Conveyor.luau` — Heartbeat now drops models whose PrimaryPart is gone instead
+  of tracking dead models. Spawn spread widened 4.8 -> 9 studs across the
+  12-wide belt (was a cluster in the middle).
+- `BrainrotData.luau` + `GameData.json` — Rarity rebalance: Brainrot God 1.4 ->
+  2.0, Secret 0.1 -> 0.3 (a Secret spawned ~once per 87 min of continuous play,
+  so the rarest content was effectively invisible in a session). Mirrored in
+  both files; total weight now 100.8.
+- `Rival.luau` — The rival now hunts the highest-income brainrot instead of a
+  random one (protecting your best earner via lock/slap is now a real decision).
+- `HUD.luau` — Collection rows reset to their price when no longer owned (they
+  stayed "OWNED" forever after a rebirth or a rival theft). Title moved from
+  the top bar to bottom-right (at 1280px it overlapped the REBIRTH button).
+  Rarity ladder now computes real percentages from total weight (was assuming
+  weights sum to 100). Income card shows "★GOLDEN Ns" during Golden Hour. Shop
+  rows now show live levels (pedestals have x/12, conveyor Lv x/5, income x).
+
+NOT touched: PLAY.json (real ids), README badges, .makefun/owner.json.
+No Studio playtest exists (same as before); no HCNSEC/opencode used.
+
+## Verification (measured, this session)
+
+1. Luau balance check (corrected heuristic — the first run's `then`-counting
+   flagged `elseif` chains as false positives; re-ran counting `function` /
+   `if` / `do` / `repeat` vs `end` / `until`, and confirmed identical results
+   on the pre-edit HEAD): all 10 .luau files OK (parens/braces/brackets also
+   balanced). NOTE: balance check only, no real Luau compiler on this VM.
+2. `rojo build` twice -> byte-identical: game.rbxl 41,018 B (was 38,637 B),
+   sha256 5799aa0006dd7b9097a1bf8657b181a2d5f9fb167d0b3cd565e46228e2662dc3,
+   `<roblox!` magic. Copied to repo root game.rbxl.
+3. `main.ts` twice (out, out2) -> `diff dossier.json` EMPTY (byte-identical).
+   Dossier 186,582 B. Place: 30 instances, 11 scripts, 97,084 source bytes,
+   93.7% matched to src/ (10 of 11 scripts, 10 of 10 src/ files; bar 80%).
+4. `makefun.mjs check` (worktree) — 4 pass (competition_open, snapshot 27 files
+   / 336,300 bytes, license_osi MIT, entrypoint), 0 failed, 17 skip, 5
+   at-submission. The play_link FAIL from the unpublished state is gone.
+5. Network calls in src/: 0. Trademark strings: 0. GameData.json valid JSON.
+
 ## Coordinator independent verification (2026-11-18 ~04:33 WIB, from disk)
 
 Verified independently (not the builder's word):
