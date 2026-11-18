@@ -252,14 +252,25 @@ function main() {
   const names = ["1-start.png", "2-play.png", "3-end.png"];
   const specs = [
     {
-      brainrots: brainrots.slice(0, 8).map((b) => ({ color: b.color, x: 0, y: 0 })),
-      cash: "$2,400", income: "$180/s", rebirth: "Rebirths: 3", banner: "BRAINROT RAIN!",
+      view: "arena",
+      brainrots, rarities,
+      cash: "$2,400", income: "$180/s", rebirth: "Rebirths: 3",
+      banner: "BRAINROT RAIN!", golden: null,
     },
     {
-      brainrots: brainrots.slice(0, 6),
-      cash: "$7,900", income: "$412/s", rebirth: "Rebirths: 5", banner: null, golden: "GOLDEN HOUR x2",
+      view: "base",
+      brainrots, rarities,
+      cash: "$7,900", income: "$412/s", rebirth: "Rebirths: 5",
+      banner: null, golden: "GOLDEN HOUR x2",
     },
-    { brainrots: [], cash: "$12,300", income: "$1,020/s", rebirth: "Rebirths: 7", banner: null },
+    {
+      view: "collection",
+      brainrots, rarities,
+      owned: ["tung", "tralalero", "lirili", "bombardiro", "ballerina",
+              "chimpanzini", "frigo", "vaca", "giraffa", "pot", "sfinge"],
+      cash: "$12,300", income: "$1,020/s", rebirth: "Rebirths: 7",
+      banner: null, golden: null,
+    },
   ];
 
   // Prefer Python + PIL; fall back to the inline encoder.
