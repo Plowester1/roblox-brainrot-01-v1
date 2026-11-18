@@ -1,146 +1,151 @@
--- BrainrotData.luau
--- The catalog: every brainrot, rarity tiers, mutation multipliers, spawn weights.
--- Single source of truth for what exists in the game. Read by GameState, the
--- conveyor (spawning), the shop (buy/pedestal), and the client (labels/collection).
-
 local BrainrotData = {}
 
--- The 7 rarity tiers, ordered from common to rarest.
--- Each tier has: name, color (BrickColor-ish rgb), base dollars-per-second,
--- spawn weight (how often it appears on the conveyor), pedestal slot index that
--- the pedestal display uses.
-local TIER_ORDER = { "Common", "Rare", "Epic", "Legendary", "Mythic", "Brainrot God", "Secret" }
-
-BrainrotData.TierOrder = TIER_ORDER
-
-BrainrotData.Tiers = {
-	Common = {
-		rank = 1,
-		color = Color3.fromRGB(176, 220, 160),
-		baseMoney = 2,
-		weight = 58,
-	},
-	Rare = {
-		rank = 2,
-		color = Color3.fromRGB(120, 190, 255),
-		baseMoney = 6,
-		weight = 27,
-	},
-	Epic = {
-		rank = 3,
-		color = Color3.fromRGB(190, 120, 255),
-		baseMoney = 15,
-		weight = 10,
-	},
-	Legendary = {
-		rank = 4,
-		color = Color3.fromRGB(255, 200, 90),
-		baseMoney = 35,
-		weight = 5,
-	},
-	Mythic = {
-		rank = 5,
-		color = Color3.fromRGB(255, 120, 190),
-		baseMoney = 80,
-		weight = 1.8,
-	},
-	["Brainrot God"] = {
-		rank = 6,
-		color = Color3.fromRGB(255, 220, 60),
-		baseMoney = 180,
-		weight = 0.35,
-	},
-	Secret = {
-		rank = 7,
-		color = Color3.fromRGB(255, 80, 90),
-		baseMoney = 420,
-		weight = 0.06,
-	},
+-- Seven rarity tiers from Common to Secret. Higher index = rarer and richer.
+local RARITY_TIERS = {
+	{ name = "Common",        index = 1, weight = 44, color = Color3.fromRGB(127, 127, 127), baseIncome = 4 },
+	{ name = "Rare",          index = 2, weight = 26, color = Color3.fromRGB(38, 140, 242),  baseIncome = 12 },
+	{ name = "Epic",          index = 3, weight = 15, color = Color3.fromRGB(184, 77, 230),  baseIncome = 34 },
+	{ name = "Legendary",     index = 4, weight = 8,  color = Color3.fromRGB(242, 179, 26),  baseIncome = 95 },
+	{ name = "Mythic",        index = 5, weight = 4,  color = Color3.fromRGB(230, 51, 77),   baseIncome = 260 },
+	{ name = "Brainrot God",  index = 6, weight = 2,  color = Color3.fromRGB(26, 230, 217),  baseIncome = 720 },
+	{ name = "Secret",        index = 7, weight = 1,  color = Color3.fromRGB(255, 255, 255), baseIncome = 2400 },
 }
 
--- The absurd Italian-brainrot names. Each entry: name, tier, base dollars/sec.
--- Higher rarity names sit higher up the ladderhouse.
-BrainrotData.Catalog = {
-	{ name = "Frigo Camelo", tier = "Common", baseMoney = 2 },
-	{ name = "Giraffa Celeste", tier = "Common", baseMoney = 3 },
-	{ name = "Trippi Troppi", tier = "Common", baseMoney = 4 },
-	{ name = "Chimpanzini Bananini", tier = "Rare", baseMoney = 6 },
-	{ name = "Pot Hotspot", tier = "Rare", baseMoney = 7 },
-	{ name = "Cappuccino Assassino", tier = "Rare", baseMoney = 9 },
-	{ name = "Lirili Larila", tier = "Epic", baseMoney = 15 },
-	{ name = "Tralalero Tralala", tier = "Epic", baseMoney = 18 },
-	{ name = "Tung Tung Tung Sahur", tier = "Legendary", baseMoney = 35 },
-	{ name = "Bombardiro Crocodilo", tier = "Legendary", baseMoney = 42 },
-	{ name = "Ballerina Cappuccina", tier = "Mythic", baseMoney = 80 },
-	{ name = "La Vaca Saturno Saturnita", tier = "Mythic", baseMoney = 96 },
-	{ name = "Lirili Larila Supreme", tier = "Brainrot God", baseMoney = 180 },
-	{ name = "??? Sahur", tier = "Secret", baseMoney = 420 },
+local MUTATION_MULTIPLIERS = {
+	None = 1,
+	Golden = 2,
+	Diamond = 5,
+	Rainbow = 10,
+	Bloodrot = 25,
 }
 
--- Mutation multipliers, applied on top of the base dollars/sec.
--- Mutations also tint the model and show up in the floating label.
-BrainrotData.Mutations = {
-	None = { mult = 1, color = Color3.fromRGB(255, 255, 255), label = "" },
-	Golden = { mult = 2, color = Color3.fromRGB(255, 215, 0), label = "Golden" },
-	Diamond = { mult = 5, color = Color3.fromRGB(180, 240, 255), label = "Diamond" },
-	Rainbow = { mult = 10, color = Color3.fromRGB(255, 140, 255), label = "Rainbow" },
-	Bloodrot = { mult = 25, color = Color3.fromRGB(200, 40, 40), label = "Bloodrot" },
-}
-
--- The chance each spawned brainrot is mutated (otherwise None).
-BrainrotData.MutationChance = {
+local MUTATION_CHANCES = {
 	Golden = 0.06,
-	Diamond = 0.025,
-	Rainbow = 0.012,
-	Bloodrot = 0.004,
+	Diamond = 0.03,
+	Rainbow = 0.01,
+	Bloodrot = 0.005,
 }
 
--- Cost to buy a brainrot off the conveyor, before any upgrade multiplier.
--- Roughly (10 + tier * 15) base, scaled by the player's owned count a touch.
-function BrainrotData.BuyCost(tier)
-	local rank = BrainrotData.Tiers[tier] and BrainrotData.Tiers[tier].rank or 1
-	return math.floor(12 + rank * rank * 6)
+local MUTATION_COLORS = {
+	Golden = Color3.fromRGB(255, 215, 0),
+	Diamond = Color3.fromRGB(80, 220, 255),
+	Rainbow = Color3.fromRGB(255, 105, 180),
+	Bloodrot = Color3.fromRGB(160, 20, 25),
+}
+
+-- The absurd Italian-brainrot cast.
+local BRAINROTS = {
+	{ id = "tung",        name = "Tung Tung Tung Sahur",         rarity = "Common",       base = 2,   color = Color3.fromRGB(230, 179, 64),  size = 1 },
+	{ id = "tralalero",   name = "Tralalero Tralala",            rarity = "Common",       base = 2,   color = Color3.fromRGB(191, 140, 242), size = 1 },
+	{ id = "lirili",      name = "Lirili Larila",                rarity = "Common",       base = 3,   color = Color3.fromRGB(102, 204, 242), size = 1 },
+	{ id = "bombardiro",  name = "Bombardiro Crocodilo",         rarity = "Rare",         base = 8,   color = Color3.fromRGB(26, 191, 77),   size = 1.1 },
+	{ id = "ballerina",   name = "Ballerina Cappuccina",         rarity = "Rare",         base = 9,   color = Color3.fromRGB(242, 115, 191), size = 1.05 },
+	{ id = "chimpanzini", name = "Chimpanzini Bananini",         rarity = "Epic",         base = 24,  color = Color3.fromRGB(250, 217, 89),  size = 1.15 },
+	{ id = "frigo",       name = "Frigo Camelo",                 rarity = "Epic",         base = 27,  color = Color3.fromRGB(38, 204, 217),  size = 1.2 },
+	{ id = "vaca",        name = "La Vaca Saturno Saturnita",    rarity = "Legendary",    base = 70,  color = Color3.fromRGB(102, 64, 153),  size = 1.3 },
+	{ id = "trippi",      name = "Trippi Troppi",                rarity = "Legendary",    base = 76,  color = Color3.fromRGB(230, 51, 230),  size = 1.25 },
+	{ id = "giraffa",     name = "Giraffa Celeste",              rarity = "Mythic",       base = 200, color = Color3.fromRGB(64, 191, 250),  size = 1.4 },
+	{ id = "assassino",   name = "Cappuccino Assassino",         rarity = "Mythic",       base = 230, color = Color3.fromRGB(140, 89, 51),   size = 1.35 },
+	{ id = "pot",         name = "Pot Hotspot",                  rarity = "Brainrot God", base = 660, color = Color3.fromRGB(89, 230, 89),   size = 1.45 },
+	{ id = "sfinge",      name = "Sfinge Pinguino",              rarity = "Secret",       base = 2100, color = Color3.fromRGB(255, 128, 128), size = 1.7 },
+}
+
+local byId = {}
+for _, b in ipairs(BRAINROTS) do
+	byId[b.id] = b
 end
 
--- Pick a tier at random weighted by each tier's spawn weight.
-function BrainrotData.PickTier()
-	local total = 0
-	for _, tier in ipairs(TIER_ORDER) do
-		total = total + BrainrotData.Tiers[tier].weight
-	end
-	local roll = math.random() * total
-	local acc = 0
-	for _, tier in ipairs(TIER_ORDER) do
-		acc = acc + BrainrotData.Tiers[tier].weight
-		if roll <= acc then
-			return tier
+local rarityByName = {}
+for _, t in ipairs(RARITY_TIERS) do
+	rarityByName[t.name] = t
+end
+
+local RARITY_MULT = {}
+for _, t in ipairs(RARITY_TIERS) do
+	RARITY_MULT[t.name] = t.index * t.index -- simple scaling for bonus packs
+end
+
+function BrainrotData.getBrainrots()
+	return BRAINROTS
+end
+
+function BrainrotData.getBrainrotById(id)
+	return byId[id]
+end
+
+function BrainrotData.getRarityTiers()
+	return RARITY_TIERS
+end
+
+function BrainrotData.getRarity(name)
+	return rarityByName[name]
+end
+
+function BrainrotData.getMutationMultipliers()
+	return MUTATION_MULTIPLIERS
+end
+
+function BrainrotData.getMutationMultiplier(name)
+	return MUTATION_MULTIPLIERS[name] or 1
+end
+
+function BrainrotData.getMutationChances()
+	return MUTATION_CHANCES
+end
+
+function BrainrotData.getMutationColor(name)
+	return MUTATION_COLORS[name]
+end
+
+-- Weighted rarity pick. Brainrot Rain forces Epic or better.
+function BrainrotData.rollRarity(epicOrBetter)
+	local pool = {}
+	for _, t in ipairs(RARITY_TIERS) do
+		if not epicOrBetter or t.index >= 3 then
+			table.insert(pool, t)
 		end
 	end
-	return "Common"
+	local total = 0
+	for _, t in ipairs(pool) do
+		total += t.weight
+	end
+	local r = math.random() * total
+	for _, t in ipairs(pool) do
+		r -= t.weight
+		if r <= 0 then
+			return t
+		end
+	end
+	return pool[#pool]
 end
 
--- Pick a random brainrot name belonging to a tier.
-function BrainrotData.PickName(tier)
+-- Pick a random brainrot of a rarity (or any if nil).
+function BrainrotData.rollBrainrot(rarityName)
 	local pool = {}
-	for _, entry in ipairs(BrainrotData.Catalog) do
-		if entry.tier == tier then
-			table.insert(pool, entry.name)
+	for _, b in ipairs(BRAINROTS) do
+		if rarityName == nil or b.rarity == rarityName then
+			table.insert(pool, b)
 		end
 	end
 	if #pool == 0 then
-		return "Frigo Camelo"
+		pool = BRAINROTS
 	end
 	return pool[math.random(1, #pool)]
 end
 
--- Pick a mutation at random following the mutation chances.
-function BrainrotData.PickMutation()
-	local roll = math.random()
+-- Roll a mutation (may be None).
+function BrainrotData.rollMutation()
+	local total = 0
+	for _, c in pairs(MUTATION_CHANCES) do
+		total += c
+	end
+	local r = math.random() * total
 	local acc = 0
-	for _, mut in ipairs({ "Golden", "Diamond", "Rainbow", "Bloodrot" }) do
-		acc = acc + BrainrotData.MutationChance[mut]
-		if roll <= acc then
-			return mut
+	local names = { "Golden", "Diamond", "Rainbow", "Bloodrot" }
+	for _, name in ipairs(names) do
+		acc += MUTATION_CHANCES[name]
+		if r <= acc then
+			return name
 		end
 	end
 	return "None"

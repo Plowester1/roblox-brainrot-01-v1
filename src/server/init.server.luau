@@ -1,168 +1,122 @@
--- init.server.luau
--- Server entry: builds the world (via WorldBuilder), wires RemoteEvents, starts
--- the income loop and the event system.
-
-local GameState = require(script.GameState)
-local WorldBuilder = require(script.WorldBuilder)
-local Conveyor = require(script.Conveyor)
-local Rival = require(script.Rival)
-local Shop = require(script.Shop)
-local BrainrotData = require(script.BrainrotData)
-
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- The RemoteEvents the client talks to. Declared in default.project.json; here we
--- just look them up and wire them.
-local remotes = ReplicatedStorage.Remotes
+local WorldBuilder = require(script.Parent.WorldBuilder)
+local GameState = require(script.Parent.GameState)
+local Conveyor = require(script.Parent.Conveyor)
+local Rival = require(script.Parent.Rival)
+local Shop = require(script.Parent.Shop)
 
-local REMOTE_NAMES = { "BuyBrainrot", "StealBrainrot", "SlapRival", "LockBase", "Rebirth", "BuyUpgrade" }
+-- Server entry point: build the world, wire remote events, and start the
+-- income loop plus the periodic events (Brainrot Rain, Golden Hour).
 
--- Broadcast the current HUD state to a client (or all clients when nil).
-local function packState(player)
-	local data = GameState.Get(player)
-	if not data then
-		return nil
-	end
-	return {
-		cash = math.floor(GameState.GetCash(player)),
-		income = GameState.IncomePerSecond(player),
-		rebirths = GameState.GetRebirths(player),
-		pedestals = GameState.MaxPedestals(player),
-		used = GameState.CountOwned(player),
-		lockLeft = GameState.LockSecondsLeft(),
-		golden = GameState.GoldenHourLeft(),
-		collection = GameState.GetCollection(player),
-	}
-end
+local INCOME_INTERVAL = 1.0 -- seconds per income tick
+local EVENT_INTERVAL = 80 -- seconds between events
+local GOLDEN_HOUR_EVERY = 300 -- seconds between golden hours
+local GOLDEN_HOUR_DURATION = 60
 
-local function sync(player)
-	if not remotes or not remotes.SyncState then
-		return
-	end
-	local target = player or Players
-	if player then
-		remotes.SyncState:FireClient(player, packState(player))
-	else
-		for _, p in ipairs(Players:GetPlayers()) do
-			remotes.SyncState:FireClient(p, packState(p))
-		end
+local goldenHourUntil = 0
+local nextEventAt = 0
+local nextGoldenAt = 0
+
+local function announceEvent(title, subtitle)
+	local events = GameState.getRemoteEvents()
+	local ev = events:FindFirstChild("EventBanner")
+	if ev then
+		ev:FireAllClients({
+			title = title,
+			subtitle = subtitle or "",
+		})
 	end
 end
 
--- Wire all RemoteEvents to the shop handlers.
-local function wire()
-	for _, name in ipairs(REMOTE_NAMES) do
-		local ev = remotes:FindFirstChild(name)
-		if not ev then
-			continue
-		end
-		if name == "BuyBrainrot" then
-			ev.OnServerEvent:Connect(function(player, model)
-				local ok, res = Shop.Buy(player, model)
-				if ok then
-					sync(player)
-				end
-			end)
-		elseif name == "StealBrainrot" then
-			ev.OnServerEvent:Connect(function(player, model)
-				local ok, res = Shop.StealFromRival(player, model)
-				if ok then
-					sync(player)
-				end
-			end)
-		elseif name == "SlapRival" then
-			ev.OnServerEvent:Connect(function(player)
-				Shop.SlapRival(player)
-			end)
-		elseif name == "LockBase" then
-			ev.OnServerEvent:Connect(function(player)
-				local ok = Shop.LockBase(player)
-				if ok then
-					sync(player)
-				end
-			end)
-		elseif name == "Rebirth" then
-			ev.OnServerEvent:Connect(function(player)
-				local ok = Shop.Rebirth(player)
-				if ok then
-					sync(player)
-				end
-			end)
-		elseif name == "BuyUpgrade" then
-			ev.OnServerEvent:Connect(function(player, upgrade)
-				local ok = Shop.BuyUpgrade(player, upgrade)
-				if ok then
-					sync(player)
-				end
-			end)
-		end
-	end
-end
-
--- Income loop: pay the player their dollars-per-second, ticking the HUD.
-local function incomeLoop()
+local function startIncomeLoop()
 	while true do
-		task.wait(1)
+		task.wait(INCOME_INTERVAL)
 		for _, player in ipairs(Players:GetPlayers()) do
-			if GameState.Get(player) then
-				local income = GameState.IncomePerSecond(player)
-				if income > 0 then
-					GameState.AddCash(player, income)
+			local st = GameState.getState(player)
+			if st then
+				local income = GameState.totalIncome(player)
+				local mult = 1
+				if os.clock() < goldenHourUntil then
+					mult = 2
 				end
-				sync(player)
+				GameState.addCash(player, income * mult)
 			end
 		end
 	end
 end
 
--- Event system: Brainrot Rain every ~90s, Golden Hour every ~5min.
-local function eventLoop()
-	local rainDelay = 75 + math.random(0, 30)
-	local goldenDelay = 240 + math.random(0, 90)
-	local rainAcc = rainDelay
-	local goldenAcc = goldenDelay
+local function fireEvent()
+	local r = math.random()
+	local events = GameState.getRemoteEvents()
+	local spawnEv = events:FindFirstChild("BrainrotSpawned")
+	if r < 0.6 then
+		-- Brainrot Rain: spawn an Epic+ brainrot on the belt with fanfare.
+		announceEvent("BRAINROT RAIN!", "An Epic+ brainrot is rolling down the belt!")
+		task.wait(0.8)
+		Conveyor.spawnBrainrot(true)
+	else
+		announceEvent("DONATION WAVE", "The belt is running hot - more brainrots incoming!")
+		Conveyor.spawnBrainrot(true)
+	end
+end
+
+local function startEventLoop()
 	while true do
-		task.wait(1)
-		rainAcc = rainAcc - 1
-		goldenAcc = goldenAcc - 1
-		if rainAcc <= 0 then
-			rainAcc = 75 + math.random(0, 30)
-			local player = Players:GetPlayers()[1]
-			if player and GameState.Get(player) then
-				Conveyor.SpawnEvent(player)
-				if remotes and remotes.Event then
-					remotes.Event:FireAllClients("rain")
-				end
-			end
-		end
-		if goldenAcc <= 0 then
-			goldenAcc = 240 + math.random(0, 90)
-			GameState.StartGoldenHour(60)
-			if remotes and remotes.Event then
-				remotes.Event:FireAllClients("golden")
-			end
+		task.wait(EVENT_INTERVAL)
+		fireEvent()
+		if os.clock() >= nextGoldenAt then
+			goldenHourUntil = os.clock() + GOLDEN_HOUR_DURATION
+			nextGoldenAt = os.clock() + GOLDEN_HOUR_EVERY
+			announceEvent("GOLDEN HOUR!", "All income x2 for 60 seconds!")
 		end
 	end
 end
 
--- Player lifecycle.
-Players.PlayerAdded:Connect(function(player)
-	GameState.Reset(player)
-	task.wait(2)
-	sync(player)
-end)
+-- Connect a player: init their state and spawn them on their base.
+local function onPlayerAdded(player)
+	GameState.initState(player)
+	player.CharacterAdded:Connect(function(char)
+		local hrp = char:WaitForChild("HumanoidRootPart")
+		hrp.CFrame = CFrame.new(WorldBuilder.PLAYER_BASE.center + Vector3.new(0, 4, 0))
+	end)
+	if not player.Character then
+		player:LoadCharacter()
+	end
+end
 
-Players.PlayerRemoving:Connect(function(player)
-	GameState.Remove(player)
-end)
+local function onPlayerRemoving(player)
+	GameState.removePlayer(player)
+end
 
--- Boot the world and the systems.
-WorldBuilder.BuildWorld()
-wire()
-Conveyor.Start()
-Rival.Start()
-task.spawn(incomeLoop)
-task.spawn(eventLoop)
+-- Build the world and start all systems.
+WorldBuilder.setupLighting()
+WorldBuilder.buildArena()
+WorldBuilder.buildBase("PlayerBase", WorldBuilder.PLAYER_BASE, 4, Color3.fromRGB(70, 120, 220))
+WorldBuilder.buildBase("RivalBase", WorldBuilder.RIVAL_BASE, 4, Color3.fromRGB(220, 70, 70))
+WorldBuilder.buildConveyor()
+Rival.buildModel()
 
-print("Brainrot Base Wars server started.")
+Shop.init()
+
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
+
+for _, existing in ipairs(Players:GetPlayers()) do
+	onPlayerAdded(existing)
+end
+
+task.spawn(startIncomeLoop)
+task.spawn(startEventLoop)
+Conveyor.start(RunService)
+Rival.start(RunService)
+
+-- spawn a few brainrots right away so the belt is never empty
+for _ = 1, 3 do
+	task.spawn(function()
+		task.wait(math.random() * 2)
+		Conveyor.spawnBrainrot(false)
+	end)
+end

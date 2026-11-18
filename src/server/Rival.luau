@@ -1,202 +1,209 @@
--- Rival.luau
--- The NPC rival bot: wanders the arena, picks a brainrot to steal from the
--- player's base, carries it back, can be slapped (drops it), and respects the
--- player's base lock.
+local Players = game:GetService("Players")
+
+local WorldBuilder = require(script.Parent.WorldBuilder)
+local GameState = require(script.Parent.GameState)
+
+-- The rival: an NPC that wanders between the two bases, steals a brainrot from
+-- the player's base and carries it home, and can be slapped (which makes it
+-- drop what it carries). It respects the player's base lock.
 
 local Rival = {}
 
-local GameState = require(script.Parent.GameState)
-local WorldBuilder = require(script.Parent.WorldBuilder)
-local BrainrotData = require(script.Parent.BrainrotData)
+local pb = WorldBuilder.PLAYER_BASE
+local rb = WorldBuilder.RIVAL_BASE
 
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-
-local LAYOUT = WorldBuilder.Layout
-
-local rival = {
+local state = {
 	model = nil,
-	state = "idle",      -- idle | walking | stealing | carrying
-	target = nil,        -- brainrot model being stolen
-	targetIndex = nil,
-	targetBase = nil,    -- "Player" | "Rival"
-	path = nil,
-	step = 0,
-	speed = 3,
+	body = nil,
+	pos = rb.center + Vector3.new(0, 1.4, 0),
+	home = rb.center,
+	target = pb.center,
+	carryingId = nil,
+	slappedUntil = 0,
+	wanderPhase = 0,
 }
 
--- Build the rival's blocky body in the arena.
-function Rival.Spawn()
+function Rival.buildModel()
 	local model = Instance.new("Model")
-	model.Name = "Rival"
+	model.Name = "RivalBot"
+	model.Parent = workspace
 
 	local body = Instance.new("Part")
-	body.Name = "Body"
-	body.Size = Vector3.new(2, 2.4, 2)
-	body.Color = Color3.fromRGB(120, 60, 60)
+	body.Name = "RivalBody"
+	body.Size = Vector3.new(2.2, 3.2, 1.8)
+	body.Color = Color3.fromRGB(40, 40, 120)
+	body.Material = Enum.Material.SmoothPlastic
 	body.Anchored = true
-	body.TopSurface = Enum.SurfaceType.Smooth
-	body.BottomSurface = Enum.SurfaceType.Smooth
 	body.Parent = model
 
 	local head = Instance.new("Part")
-	head.Name = "Head"
-	head.Size = Vector3.new(1.8, 1.8, 1.8)
-	head.Color = Color3.fromRGB(200, 140, 120)
+	head.Name = "RivalHead"
+	head.Size = Vector3.new(1.6, 1.6, 1.6)
+	head.Color = Color3.fromRGB(90, 60, 200)
+	head.Material = Enum.Material.SmoothPlastic
 	head.Anchored = true
 	head.Parent = model
 
-	local label = Instance.new("BillboardGui")
-	label.Name = "Name"
-	label.Size = UDim2.new(0, 120, 0, 30)
-	label.StudsOffsetWorldSpace = Vector3.new(0, 3.4, 0)
-	label.AlwaysOnTop = true
-	local t = Instance.new("TextLabel")
-	t.Name = "Text"
-	t.Size = UDim2.new(1, 0, 1, 0)
-	t.BackgroundTransparency = 1
-	t.TextScaled = true
-	t.Font = Enum.Font.FredokaOne
-	t.TextColor3 = Color3.fromRGB(255, 255, 255)
-	t.Text = "RIVAL BOT"
-	t.TextStrokeTransparency = 0.2
-	t.Parent = label
-	label.Parent = model
+	local face = Instance.new("Decal")
+	face.Texture = "rbxassetid://10611106203"
+	face.Face = Enum.NormalId.Front
+	face.Parent = head
+
+	local nameTag = Instance.new("BillboardGui")
+	nameTag.Name = "NameTag"
+	nameTag.Size = UDim2.new(4, 0, 0, 0)
+	nameTag.SizeOffset = Vector2.new(0, 30)
+	nameTag.AlwaysOnTop = true
+	nameTag.StudsOffsetWorldSpace = Vector3.new(0, 2.8, 0)
+	nameTag.Parent = model
+
+	local tag = Instance.new("TextLabel")
+	tag.Size = UDim2.new(1, 0, 1, 0)
+	tag.BackgroundTransparency = 1
+	tag.Font = Enum.Font.GothamBold
+	tag.TextScaled = true
+	tag.TextColor3 = Color3.fromRGB(255, 120, 120)
+	tag.Text = "RIVAL"
+	tag.Parent = nameTag
 
 	model.PrimaryPart = body
-	model:SetPrimaryPartCFrame(CFrame.new(0, 2, LAYOUT.RivalBaseZ))
-	model.Parent = workspace
+	model:PivotTo(CFrame.new(rb.center.x, 1.4, rb.center.z))
 
-	rival.model = model
+	state.model = model
+	state.body = body
 	return model
 end
 
--- Move the rival toward a target world position on the XZ plane.
-local function moveToward(pos)
-	local m = rival.model
-	if not m or not m.PrimaryPart then
+-- Move the rival toward a point on the arena floor.
+function Rival.moveToward(targetPos, dt, speed)
+	local dir = targetPos - state.pos
+	dir = Vector3.new(dir.X, 0, dir.Z)
+	if dir.Magnitude < 0.3 then
 		return
 	end
-	local cf = m:GetPivot()
-	local target = Vector3.new(pos.X, cf.Position.Y, pos.Z)
-	local dir = (target - cf.Position)
-	local dist = dir.Magnitude
-	if dist > 0.1 then
-		local step = rival.speed * 0.02
-		local move = dir.Unit * math.min(step, dist)
-		m:SetPrimaryPartCFrame(CFrame.new(cf.Position + move))
-	end
-	return dist <= 0.6
-end
-
--- A friendly target a short distance in front of the rival's current heading.
-local function aheadOf(cf, distance)
-	return cf.Position + cf.LookVector * distance
-end
-
--- Choose a brainrot to steal: prefer the player's highest-earning owned one.
-local function pickPlayerTarget(player)
-	local owned = GameState.GetOwned(player)
-	if #owned == 0 then
-		return nil
-	end
-	local best = nil
-	local bestIndex = 0
-	local bestVal = -1
-	for i, b in ipairs(owned) do
-		local mut = BrainrotData.Mutations[b.mutation] or BrainrotData.Mutations.None
-		local val = b.baseMoney * mut.mult
-		if val > bestVal then
-			bestVal = val
-			best = b
-			bestIndex = i
+	local move = dir.Unit * speed * dt
+	state.pos += move
+	if state.model then
+		state.model:PivotTo(CFrame.new(state.pos + Vector3.new(0, 0, 0), state.pos + move * 10))
+		local head = state.model:FindFirstChild("RivalHead")
+		if head then
+			head.Position = state.pos + Vector3.new(0, 1.2, 0)
 		end
 	end
-	return best, bestIndex
 end
 
-local function tick(player)
-	if not rival.model then
+-- Drop whatever the rival is carrying (it lands on the arena where the rival is).
+function Rival.dropCarried()
+	local id = state.carryingId
+	state.carryingId = nil
+	if not id then
 		return
 	end
-	if rival.state == "idle" then
-		-- Wander a little, then decide to raid the player base.
-		if math.random() < 0.5 then
-			moveToward(Vector3.new(math.random(-10, 10), 0, math.random(-30, 30)))
+	-- The model stays registered; it can be picked up again by the player.
+end
+
+function Rival.isSlapped()
+	return os.clock() < state.slappedUntil
+end
+
+function Rival.slap()
+	state.slappedUntil = os.clock() + 2.5
+	Rival.dropCarried()
+	-- knock the rival back toward its own base
+	state.pos += Vector3.new(6, 0, 0)
+end
+
+function Rival.getCarrying()
+	return state.carryingId
+end
+
+-- Main loop: wander to the player base, steal a brainrot, carry it home, repeat.
+function Rival.start(runService)
+	runService.Heartbeat:Connect(function(dt)
+		Rival.tick(dt)
+	end)
+end
+
+function Rival.tick(dt)
+	if Rival.isSlapped() then
+		return
+	end
+
+	-- Find the first player
+	local player = nil
+	for _, p in ipairs(Players:GetPlayers()) do
+		player = p
+		break
+	end
+	if not player then
+		return
+	end
+
+	local st = GameState.getState(player)
+	if not st then
+		return
+	end
+
+	if state.carryingId then
+		-- carry it home
+		Rival.moveToward(state.home + Vector3.new(0, 1.4, 0), dt, 5)
+		local dist = (state.home - state.pos).Magnitude
+		if dist < 2.5 then
+			Rival.dropCarried()
+			state.pos = state.home
 		end
-		if math.random() < 0.02 then
-			if GameState.IsLocked() then
+		return
+	end
+
+	-- at player base, look for a brainrot to steal
+	local distToBase = (pb.center - state.pos).Magnitude
+	if distToBase < 6 then
+		if os.clock() > st.lockUntil then
+			local target = Rival.pickStealTarget(player)
+			if target then
+				state.carryingId = target
+				Rival.stealFromPedestal(player, target)
 				return
 			end
-			local target, idx = pickPlayerTarget(player)
-			if target then
-				rival.state = "walking"
-				rival.targetIndex = idx
-				rival.targetBase = "Player"
+		end
+		-- go home and wait
+		Rival.moveToward(state.home + Vector3.new(0, 1.4, 0), dt, 7)
+	else
+		-- walk toward the player base
+		Rival.moveToward(pb.center + Vector3.new(0, 1.4, 0), dt, 6)
+	end
+end
+
+function Rival.pickStealTarget(player)
+	local st = GameState.getState(player)
+	local bestId = nil
+	local bestIncome = -1
+	for id, b in pairs(st.owned) do
+		if not GameState.getCarrying(player) then
+			local inc = GameState.brainrotIncome(player, b)
+			if inc > bestIncome then
+				bestIncome = inc
+				bestId = id
 			end
 		end
-	elseif rival.state == "walking" then
-		local dest = Vector3.new(0, 0, LAYOUT.PlayerBaseZ)
-		if moveToward(dest) then
-			rival.state = "stealing"
-		end
-	elseif rival.state == "stealing" then
-		-- Pick up the target brainrot (a model on the player base).
-		local owned = GameState.GetOwned(player)
-		local b = owned[rival.targetIndex]
-		if not b then
-			rival.state = "idle"
-			return
-		end
-		rival.state = "carrying"
-		rival.target = b
-	elseif rival.state == "carrying" then
-		local dest = Vector3.new(0, 0, LAYOUT.RivalBaseZ)
-		if moveToward(dest) then
-			-- Deposit the stolen brainrot on the rival base (it is gone for the
-			-- player, plus a small cash reward for the rival-owned "NPC").
-			if rival.target then
-				GameState.RemoveOwned(player, rival.targetIndex)
-			end
-			rival.target = nil
-			rival.targetIndex = nil
-			rival.state = "idle"
-		end
 	end
+	return bestId
 end
 
--- Slap the rival: knock it back and make it drop what it carries.
-function Rival.Slap(player)
-	if not rival.model then
-		return false
+-- Remove a brainrot from the player's pedestal (it is now "carried" by the rival).
+function Rival.stealFromPedestal(player, brainrotId)
+	local st = GameState.getState(player)
+	st.owned[brainrotId] = nil
+	local pedestal = GameState.getPedestalFor(player, brainrotId)
+	if pedestal then
+		GameState.releasePedestal(player, pedestal)
 	end
-	local cf = rival.model:GetPivot()
-	local away = cf.LookVector * -6
-	rival.model:SetPrimaryPartCFrame(CFrame.new(cf.Position + Vector3.new(away.X, 0, away.Z)))
-	if rival.state == "carrying" then
-		rival.target = nil
-		rival.targetIndex = nil
-		rival.state = "idle"
+	-- keep the model registered so the player can reclaim it from the rival base
+	local model = GameState.getBrainrotModel(brainrotId)
+	if model and model.model then
+		model.model:PivotTo(CFrame.new(state.pos))
 	end
-	return true
-end
-
-function Rival.IsCarrying()
-	return rival.state == "carrying"
-end
-
-local function startLoop()
-	while true do
-		RunService.Heartbeat:Wait()
-		local player = Players:GetPlayers()[1]
-		if player and GameState.Get(player) then
-			tick(player)
-		end
-	end
-end
-
-function Rival.Start()
-	task.spawn(startLoop)
+	GameState.sync(player)
 end
 
 return Rival

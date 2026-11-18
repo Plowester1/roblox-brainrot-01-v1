@@ -1,0 +1,41 @@
+{
+  "game": "brainrot-base-wars",
+  "title": "Brainrot Base Wars",
+  "rarityTiers": [
+    { "name": "Common", "index": 1, "weight": 44, "color": [0.5, 0.5, 0.5], "baseIncome": 4 },
+    { "name": "Rare", "index": 2, "weight": 26, "color": [0.15, 0.55, 0.95], "baseIncome": 12 },
+    { "name": "Epic", "index": 3, "weight": 15, "color": [0.72, 0.3, 0.9], "baseIncome": 34 },
+    { "name": "Legendary", "index": 4, "weight": 8, "color": [0.95, 0.7, 0.1], "baseIncome": 95 },
+    { "name": "Mythic", "index": 5, "weight": 4, "color": [0.9, 0.2, 0.3], "baseIncome": 260 },
+    { "name": "Brainrot God", "index": 6, "weight": 2, "color": [0.1, 0.9, 0.85], "baseIncome": 720 },
+    { "name": "Secret", "index": 7, "weight": 1, "color": [1, 1, 1], "baseIncome": 2400 }
+  ],
+  "mutationMultipliers": {
+    "None": 1,
+    "Golden": 2,
+    "Diamond": 5,
+    "Rainbow": 10,
+    "Bloodrot": 25
+  },
+  "mutationChances": {
+    "Golden": 0.06,
+    "Diamond": 0.03,
+    "Rainbow": 0.01,
+    "Bloodrot": 0.005
+  },
+  "brainrots": [
+    { "id": "tung", "name": "Tung Tung Tung Sahur", "rarity": "Common", "base": 2, "color": [0.9, 0.7, 0.25], "size": 1 },
+    { "id": "tralalero", "name": "Tralalero Tralala", "rarity": "Common", "base": 2, "color": [0.75, 0.55, 0.95], "size": 1 },
+    { "id": "lirili", "name": "Lirili Larila", "rarity": "Common", "base": 3, "color": [0.4, 0.8, 0.95], "size": 1 },
+    { "id": "bombardiro", "name": "Bombardiro Crocodilo", "rarity": "Rare", "base": 8, "color": [0.1, 0.75, 0.3], "size": 1.1 },
+    { "id": "ballerina", "name": "Ballerina Cappuccina", "rarity": "Rare", "base": 9, "color": [0.95, 0.45, 0.75], "size": 1.05 },
+    { "id": "chimpanzini", "name": "Chimpanzini Bananini", "rarity": "Epic", "base": 24, "color": [0.98, 0.85, 0.35], "size": 1.15 },
+    { "id": "frigo", "name": "Frigo Camelo", "rarity": "Epic", "base": 27, "color": [0.15, 0.8, 0.85], "size": 1.2 },
+    { "id": "vaca", "name": "La Vaca Saturno Saturnita", "rarity": "Legendary", "base": 70, "color": [0.4, 0.25, 0.6], "size": 1.3 },
+    { "id": "trippi", "name": "Trippi Troppi", "rarity": "Legendary", "base": 76, "color": [0.9, 0.2, 0.9], "size": 1.25 },
+    { "id": "giraffa", "name": "Giraffa Celeste", "rarity": "Mythic", "base": 200, "color": [0.25, 0.75, 0.98], "size": 1.4 },
+    { "id": "assassino", "name": "Cappuccino Assassino", "rarity": "Mythic", "base": 230, "color": [0.55, 0.35, 0.2], "size": 1.35 },
+    { "id": "pot", "name": "Pot Hotspot", "rarity": "Brainrot God", "base": 660, "color": [0.35, 0.9, 0.35], "size": 1.45 },
+    { "id": "sfinge", "name": "Sfinge Pinguino", "rarity": "Secret", "base": 2100, "color": [1, 0.5, 0.5], "size": 1.7 }
+  ]
+}

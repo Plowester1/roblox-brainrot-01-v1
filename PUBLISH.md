@@ -1,27 +1,19 @@
-# Publishing Brainrot Base Wars
+# Publishing
 
-The place is **already published and Public** on Roblox under the @polersyer
-account. The experience IDs live in `PLAY.json`.
+The place for this game is **already published and Public**:
+https://www.roblox.com/games/79673833446434 (place_id 79673833446434, universe_id 8420965215).
 
-- **URL:** https://www.roblox.com/games/79673833446434
-- **Place ID:** 79673833446434
-- **Universe ID:** 8420965215
-- **Play code:** `makefun-ladder-dugout-vine` (code 0 of 4), in the experience
-  description.
+The play code in the experience description is `makefun-ladder-dugout-vine`.
 
-## Uploading a new version
+## After any source change
 
-Each build of the game is produced as a binary `game.rbxl` with Rojo:
+1. Build the place from source:
+   `~/workspace/makefun/rojo/rojo build default.project.json --output game.rbxl`
+2. Upload `game.rbxl` over the existing place via Roblox Studio (or the Creator Dashboard's
+   place upload), so the live experience matches the repo.
+3. Re-run `node scripts/render-screenshots.mjs` if the world/HUD changed, so the screenshots
+   match, then re-upload the thumbnail (one of the screenshots) on the Creator Dashboard.
+4. Run the kit checks and hand the game in with `main.ts`.
 
-    ~/workspace/makefun/rojo/rojo build default.project.json --output game.rbxl
-
-To push a fresh build to the live place, upload `game.rbxl` as a new version
-through the Creator Dashboard (Create → Brainrot Base Wars → … → Upload/Version)
-or the Open Cloud Assets API. Keep the experience set to **Public** so the
-judge and anyone with the play link can play it.
-
-## Play code
-
-The play code is written in the experience description. If it is ever missing,
-re-add the exact string `makefun-ladder-dugout-vine` anywhere in the
-description; the submission checker only needs it present.
+The account's owner (the poler account) sets the experience Public and uploads the icon/thumbnail
+on the Creator Dashboard as Roblox asks for (age check, genre, content questionnaire first).
