@@ -281,6 +281,15 @@ function main() {
       writeFileSync(sceneFile, JSON.stringify(specs[i]));
       const out = join(outDir, names[i]);
       const r = spawnSync("python3", [join(here, "draw_scene.py"), sceneFile, out], { cwd: here });
+      const pyOut = r.stdout ? r.stdout.toString() : "";
+      if (pyOut) process.stdout.write(pyOut);
+      // The Python layout check (CHECK lines) enforces the precision rules:
+      // no label overlap, >= 20 px between labels/HUD, everything on screen.
+      // A bad layout must never be committed.
+      if (pyOut.includes("OVERLAP") || pyOut.includes("OUT_OF_BOUNDS")) {
+        console.error("LAYOUT CHECK FAILED for", names[i], "- fix draw_scene.py, do not commit");
+        process.exit(1);
+      }
       if (r.status !== 0) {
         console.error("draw_scene failed:", r.stderr && r.stderr.toString());
         fallbackWrite(scenes[i], out);

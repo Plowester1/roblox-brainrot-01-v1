@@ -8,9 +8,16 @@ the same brainrot cast, rarity ladder and HUD the game builds at runtime
 judge can see the 3D game loop and the HUD. Uses only Python's standard
 library plus PIL (Pillow). Scenes are rendered at 2x and downscaled with
 LANCZOS for smooth edges.
+
+LAYOUT RULES (precision first): no label may overlap another label, the HUD,
+or any character other than its own; every label keeps >= 20 px from every
+other label and from the HUD; every label stays fully inside the frame.
+A registry (PLACED) records every label / HUD / character rectangle and
+check_placed() verifies the rules at render time, printing CHECK lines.
+If a CHECK line reports OVERLAP or OUT_OF_BOUNDS, the render is bad and
+must be fixed before committing.
 """
 import json
-import math
 import random
 import sys
 
@@ -45,10 +52,6 @@ def shade(c, f):
     return tuple(max(0, min(255, int(round(v * f)))) for v in c)
 
 
-def to255(c01):
-    return norm_color(c01)
-
-
 def norm_color(c):
     """Normalize a color to an (r, g, b) int tuple.
 
@@ -72,6 +75,62 @@ def lerp3(c1, c2, t):
     return tuple(int(round(lerp(a, b, t))) for a, b in zip(c1, c2))
 
 
+# ---------------- layout registry ----------------
+# Every label / HUD element / character registers its screen rectangle.
+# check_placed() verifies: labels keep >= 20 px from other labels and the
+# HUD, labels never touch any character but their own, everything stays
+# inside the 1280x720 frame.
+PLACED = []
+
+
+def _register(kind, rect, own=None):
+    PLACED.append({"kind": kind, "rect": rect, "own": own})
+
+
+def _overlaps(a, b, margin):
+    # Expand only `a` by margin: the required clearance between the two
+    # rectangles is exactly `margin` px (expanding both would demand 2x).
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    return (ax0 - margin < bx1 and bx0 < ax1 + margin and
+            ay0 - margin < by1 and by0 < ay1 + margin)
+
+
+def check_placed():
+    problems = []
+    n = len(PLACED)
+    for i in range(n):
+        e = PLACED[i]
+        x0, y0, x1, y1 = e["rect"]
+        if x0 < 0 or y0 < 0 or x1 > W or y1 > H:
+            problems.append(f"OUT_OF_BOUNDS {e['kind']} {e['rect']}")
+        for j in range(i + 1, n):
+            f = PLACED[j]
+            kinds = {e["kind"], f["kind"]}
+            if kinds == {"label"}:
+                margin = 20
+            elif "label" in kinds and "hud" in kinds:
+                margin = 20
+            elif "label" in kinds and "char" in kinds:
+                lab = e if e["kind"] == "label" else f
+                ch = f if e["kind"] == "label" else e
+                # a label may sit 6 px above its own character's head
+                if lab.get("own") is not None and lab["own"] is ch["rect"]:
+                    continue
+                margin = 0
+            else:
+                continue
+            if _overlaps(e["rect"], f["rect"], margin):
+                problems.append(
+                    f"OVERLAP {e['kind']} {e['rect']} vs "
+                    f"{f['kind']} {f['rect']} (margin {margin})")
+    for p in problems:
+        print("CHECK: " + p)
+    if not problems:
+        print("CHECK: no overlaps, all inside screen")
+    return problems
+
+
 # ---------------- isometric projection ----------------
 class Iso:
     def __init__(self, cx, cy, s):
@@ -83,8 +142,13 @@ class Iso:
                 self.cy + (x + z) * 0.5 * self.s - y * self.s)
 
 
-def box3d(d, iso, x, z, hx, hz, h, color, outline=True):
-    """Draw a 3D box (prism) in isometric: top + front + right faces."""
+def box3d(d, iso, x, z, hx, hz, h, color, outline=True, y0=0):
+    """Draw a 3D box (prism) in isometric: top + front + right faces.
+
+    The box spans world heights y0..h. y0 defaults to 0 (ground); pass
+    y0=7 for a pedestal sitting on top of a 7-high platform so the
+    character standing on it does not float.
+    """
     top = shade(color, 1.0)
     front = shade(color, 0.74)
     right = shade(color, 0.56)
@@ -93,9 +157,9 @@ def box3d(d, iso, x, z, hx, hz, h, color, outline=True):
     B = iso.p(x + hx, h, z - hz)
     C = iso.p(x + hx, h, z + hz)
     D = iso.p(x - hx, h, z + hz)
-    A0 = iso.p(x - hx, 0, z - hz)
-    B0 = iso.p(x + hx, 0, z - hz)
-    C0 = iso.p(x + hx, 0, z + hz)
+    A0 = iso.p(x - hx, y0, z - hz)
+    B0 = iso.p(x + hx, y0, z - hz)
+    C0 = iso.p(x + hx, y0, z + hz)
     P = lambda pts: [(sc(px), sc(py)) for px, py in pts]
     d.polygon(P([A, B, C, D]), fill=top)
     d.polygon(P([A, B, B0, A0]), fill=front)
@@ -148,20 +212,21 @@ def text_w(s, fnt):
 
 
 # ---------------- sky, ground, decor ----------------
-def draw_sky(d, top, horizon, sun_xy=(1050, 90), sun_r=46):
+def draw_sky(d, top, horizon, sun_xy=None, sun_r=40, clouds=None):
     for i in range(H):
         t = i / H
         c = lerp3(top, horizon, t)
         d.line([(0, sc(i)), (W2, sc(i))], fill=c)
-    # sun with glow
-    sx, sy = sun_xy
-    for r, a in ((sun_r * 2.1, 40), (sun_r * 1.6, 70), (sun_r * 1.25, 110)):
-        ellipse(d, sx - r, sy - r, sx + r, sy + r, fill=(255, 236, 150))
-    ellipse(d, sx - sun_r, sy - sun_r, sx + sun_r, sy + sun_r,
-            fill=(255, 214, 64))
-    # clouds
-    for (cx, cy, s) in ((180, 70, 1.0), (430, 130, 0.75), (760, 60, 0.9),
-                        (1150, 150, 0.7), (950, 210, 0.55)):
+    if sun_xy is not None:
+        sx, sy = sun_xy
+        for r in (sun_r * 2.1, sun_r * 1.6, sun_r * 1.25):
+            ellipse(d, sx - r, sy - r, sx + r, sy + r, fill=(255, 236, 150))
+        ellipse(d, sx - sun_r, sy - sun_r, sx + sun_r, sy + sun_r,
+                fill=(255, 214, 64))
+    if clouds is None:
+        clouds = [(180, 70, 1.0), (430, 130, 0.75), (760, 60, 0.9),
+                  (1150, 150, 0.7), (950, 210, 0.55)]
+    for (cx, cy, s) in clouds:
         cloud(d, cx, cy, s)
 
 
@@ -237,8 +302,12 @@ MUTATION_STYLE = {
 
 
 def draw_character(d, fx, fy, s, color, mutation=None, face="happy",
-                   flip=False):
-    """Blocky Roblox-style figure, feet at (fx, fy), total height ~s px."""
+                   flip=False, pad_top=0):
+    """Blocky Roblox-style figure, feet at (fx, fy), total height ~s px.
+
+    Returns (head_top_y, rect) where rect bounds the whole figure
+    (extended upward by pad_top for things carried overhead).
+    """
     body = norm_color(color)
     dark = shade(body, 0.62)
     light = shade(body, 1.18)
@@ -297,24 +366,32 @@ def draw_character(d, fx, fy, s, color, mutation=None, face="happy",
     else:  # determined
         line(d, [(fx - 0.14 * s, hy0 + hh * 0.72),
                  (fx + 0.14 * s, hy0 + hh * 0.72)], (40, 30, 20), width=3)
-    return hy0
+    char_rect = (fx - 0.55 * s, hy0 - pad_top, fx + 0.55 * s, fy + 0.12 * s)
+    _register("char", char_rect)
+    return hy0, char_rect
 
 
-def draw_label(d, cx, top_y, name, rarity_name, rarity_color, income,
-               mutation=None, dy=0):
+def draw_label(d, cx, top_y, name, rarity_name, rarity_color, income=None,
+               mutation=None, own=None):
     """Floating name pill above a character. top_y = top of the pill.
-    dy shifts the pill upward (used to stagger neighbouring labels)."""
-    top_y = top_y - dy
-    name_f = font(17, bold=True)
-    sub_f = font(14, bold=True)
+
+    income=None gives a compact label (name + rarity only); pass the
+    income string for the full "Rarity · $X/s" line. The pill is clamped
+    so it never runs off the left/right screen edge.
+    """
+    name_f = font(16, bold=True)
+    sub_f = font(13, bold=True)
     line1 = name
-    line2 = rarity_name + "  ·  $" + income + "/s"
-    if mutation and mutation != "None":
-        line2 += "  ·  " + mutation.upper()
+    if income is None:
+        line2 = rarity_name
+    else:
+        line2 = rarity_name + "  ·  $" + income + "/s"
+        if mutation and mutation != "None":
+            line2 += "  ·  " + mutation.upper()
     w1 = text_w(line1, name_f)
     w2 = text_w(line2, sub_f)
     w = max(w1, w2) + 22
-    h = 48
+    h = 44
     # clamp the pill so it never runs off the left/right screen edge;
     # the tail still points at the character (clamped to the pill)
     orig_cx = cx
@@ -324,13 +401,14 @@ def draw_label(d, cx, top_y, name, rarity_name, rarity_color, income,
     y0 = top_y - h
     rrect(d, x0, y0, x0 + w, y0 + h, 9, (16, 18, 28),
           outline=(255, 255, 255), width=2)
-    text(d, cx, y0 + 5, line1, name_f, (255, 255, 255), anchor="ma")
+    text(d, cx, y0 + 4, line1, name_f, (255, 255, 255), anchor="ma")
     rc = norm_color(rarity_color)
-    text(d, cx, y0 + 26, line2, sub_f, rc, anchor="ma")
+    text(d, cx, y0 + 24, line2, sub_f, rc, anchor="ma")
     # little tail (points at the character, kept inside the pill)
     tx = max(x0 + 10, min(x0 + w - 10, orig_cx))
     poly(d, [(tx - 7, y0 + h - 1), (tx + 7, y0 + h - 1), (tx, y0 + h + 9)],
          fill=(16, 18, 28), outline=(255, 255, 255), width=1)
+    _register("label", (x0, y0, x0 + w, y0 + h), own=own)
     return y0
 
 
@@ -339,6 +417,7 @@ def hud_top(d, cash, income, rebirth, banner=None, golden=None):
     # top-left status panel
     rrect(d, 18, 16, 330, 148, 14, (14, 16, 28),
           outline=(255, 255, 255), width=2)
+    _register("hud", (18, 16, 330, 148))
     text(d, 36, 26, "BRAINROT BASE WARS", font(19, bold=True),
          (255, 214, 80))
     text(d, 36, 56, cash, font(34, bold=True), (110, 255, 140))
@@ -348,6 +427,7 @@ def hud_top(d, cash, income, rebirth, banner=None, golden=None):
     def button(x0, y0, x1, y1, label, fill, sub=None):
         rrect(d, x0, y0, x1, y1, 12, fill, outline=(255, 255, 255),
               width=2)
+        _register("hud", (x0, y0, x1, y1))
         f = font(17, bold=True)
         tw = text_w(label, f)
         text(d, (x0 + x1) / 2 - tw / 2, y0 + 12, label, f,
@@ -367,6 +447,7 @@ def hud_top(d, cash, income, rebirth, banner=None, golden=None):
         bx0 = (W - bw) / 2
         rrect(d, bx0, 18, bx0 + bw, 66, 24, (24, 20, 8),
               outline=(255, 214, 80), width=3)
+        _register("hud", (bx0, 18, bx0 + bw, 66))
         text(d, W / 2 - text_w(banner, bf) / 2, 30, banner, bf,
              (255, 222, 100))
     if golden:
@@ -375,6 +456,7 @@ def hud_top(d, cash, income, rebirth, banner=None, golden=None):
         gx0 = (W - gw) / 2
         rrect(d, gx0, 76, gx0 + gw, 110, 17, (60, 40, 8),
               outline=(255, 190, 60), width=2)
+        _register("hud", (gx0, 76, gx0 + gw, 110))
         text(d, W / 2 - text_w(golden, gf) / 2, 84, golden, gf,
              (255, 210, 90))
 
@@ -385,6 +467,7 @@ def controls_hint(d, text_s="E  Buy    ·    Q  Slap    ·    L  Lock Base    ·
     x0 = (W - w) / 2
     rrect(d, x0, H - 44, x0 + w, H - 12, 16, (14, 16, 28),
           outline=(255, 255, 255), width=2)
+    _register("hud", (x0, H - 44, x0 + w, H - 12))
     text(d, W / 2 - text_w(text_s, f) / 2, H - 36, text_s, f,
          (225, 230, 255))
 
@@ -392,20 +475,26 @@ def controls_hint(d, text_s="E  Buy    ·    Q  Slap    ·    L  Lock Base    ·
 # ---------------- view 1: wide arena ----------------
 def view_arena(d, spec, brainrots, rarities):
     rng = random.Random(11)
-    draw_sky(d, (96, 166, 232), (196, 228, 248), sun_xy=(950, 200))
+    by_id = {b["id"]: b for b in brainrots}
+    rarity_by_name = {t["name"]: t for t in rarities}
+    # small sun, kept clear of the HUD buttons and the trees
+    draw_sky(d, (96, 166, 232), (196, 228, 248),
+             sun_xy=(900, 110), sun_r=30,
+             clouds=[(200, 90, 1.0), (150, 200, 0.75), (700, 100, 0.9),
+                     (1150, 180, 0.7), (980, 240, 0.55)])
     draw_ground(d, 300, base=(96, 168, 92), rng=rng)
-    # back fence + trees (far side)
+    # back fence + trees (far side, kept to the edges so the arena reads)
     fence(d, 60, 300, 1220, 300, posts=14)
-    for (tx, ty, s) in ((80, 300, 1.15), (250, 296, 0.95), (1010, 296, 1.05),
-                        (1200, 300, 1.15), (560, 292, 0.85), (720, 292, 0.9)):
+    for (tx, ty, s) in ((80, 300, 1.15), (250, 296, 0.95),
+                        (1010, 296, 1.05), (1200, 300, 1.15)):
         tree(d, tx, ty, s)
-    bush(d, 340, 306, 1.1)
-    bush(d, 940, 306, 1.0)
+    bush(d, 180, 340, 1.1)
+    bush(d, 1100, 340, 1.0)
 
-    iso = Iso(640, 448, 6.2)
+    iso = Iso(640, 420, 7.0)
     # arena floor diamond (play area)
-    floor = [iso.p(-60, 0, -28), iso.p(60, 0, -28), iso.p(60, 0, 28),
-             iso.p(-60, 0, 28)]
+    floor = [iso.p(-58, 0, -26), iso.p(58, 0, -26), iso.p(58, 0, 26),
+             iso.p(-58, 0, 26)]
     poly(d, floor, (112, 182, 104), outline=shade((112, 182, 104), 0.75),
          width=3)
     # dirt path under conveyor
@@ -429,91 +518,52 @@ def view_arena(d, spec, brainrots, rarities):
     b = iso.p(22, 2.2, -4.5)
     line(d, [a, b], (255, 200, 60), width=4)
 
-    # --- player base (left, blue) ---
-    box3d(d, iso, -40, 0, 13, 11, 7, (88, 118, 208))
-    # base top trim
-    a = iso.p(-53, 7.05, -11)
-    b = iso.p(-27, 7.05, -11)
-    c = iso.p(-27, 7.05, 11)
-    e = iso.p(-53, 7.05, 11)
+    # --- player base (left, blue) and rival base (right, red) ---
+    # Plain platforms on purpose: the old "YOUR BASE" / "RIVAL BASE" sign
+    # boxes collided with the name labels. Colour + the YOU / rival-bot
+    # characters carry the ownership story now.
+    box3d(d, iso, -38, 0, 13, 11, 7, (88, 118, 208))
+    a = iso.p(-51, 7.05, -11)
+    b = iso.p(-25, 7.05, -11)
+    c = iso.p(-25, 7.05, 11)
+    e = iso.p(-51, 7.05, 11)
     poly(d, [a, b, c, e], (140, 170, 240),
          outline=shade((140, 170, 240), 0.7), width=2)
-    # base sign
-    sign = iso.p(-40, 7, -11.5)
-    rrect(d, sign[0] - 78, sign[1] - 34, sign[0] + 78, sign[1] - 6, 8,
-          (20, 40, 110), outline=(255, 255, 255), width=2)
-    sf = font(16, bold=True)
-    text(d, sign[0] - text_w("YOUR BASE", sf) / 2, sign[1] - 30,
-         "YOUR BASE", sf, (255, 255, 255))
-
-    # --- rival base (right, red) ---
-    box3d(d, iso, 40, 0, 13, 11, 7, (205, 88, 88))
-    a = iso.p(27, 7.05, -11)
-    b = iso.p(53, 7.05, -11)
-    c = iso.p(53, 7.05, 11)
-    e = iso.p(27, 7.05, 11)
+    box3d(d, iso, 38, 0, 13, 11, 7, (205, 88, 88))
+    a = iso.p(25, 7.05, -11)
+    b = iso.p(51, 7.05, -11)
+    c = iso.p(51, 7.05, 11)
+    e = iso.p(25, 7.05, 11)
     poly(d, [a, b, c, e], (240, 140, 130),
          outline=shade((240, 140, 130), 0.7), width=2)
-    sign = iso.p(40, 7, -11.5)
-    rrect(d, sign[0] - 78, sign[1] - 34, sign[0] + 78, sign[1] - 6, 8,
-          (110, 20, 20), outline=(255, 255, 255), width=2)
-    text(d, sign[0] - text_w("RIVAL BASE", sf) / 2, sign[1] - 30,
-         "RIVAL BASE", sf, (255, 255, 255))
 
-    # --- pedestals + brainrots on player base ---
-    # Back row (z=-5): characters only, no labels (keeps the view clean).
-    # Front row (z=+5): characters + labels, but only the centre one is
-    # labelled so the wide labels never collide.
-    ped_spots = [(-48, -5), (-40, -5), (-32, -5),
-                 (-48, 5), (-40, 5), (-32, 5)]
-    picks = [brainrots[0], brainrots[3], brainrots[5],
-             brainrots[7], brainrots[9], brainrots[11]]
-    muts = ["None", "None", "Golden", "None", "Diamond", "None"]
-    chars = []  # (depth, draw-fn)
-    for (px, pz), b, mut in zip(ped_spots, picks, muts):
-        box3d(d, iso, px, pz, 3.4, 2.9, 2.5, (200, 200, 210))
-        top = iso.p(px, 9.5, pz)
-        labelled = (pz == 5 and px == -40)
-        chars.append((px + pz, ("base", top, b, mut, labelled)))
-    # rival base pedestals (front row, centre one labelled)
-    for (px, pz), b in zip([(32, 5), (40, 5), (48, 5)],
-                           [brainrots[1], brainrots[4], brainrots[6]]):
-        box3d(d, iso, px, pz, 3.4, 2.9, 2.5, (200, 200, 210))
-        top = iso.p(px, 9.5, pz)
-        chars.append((px + pz, ("base", top, b, "None", px == 40)))
-    # conveyor walkers (only the centre one is labelled, so the wide
-    # labels never collide)
-    for cx, b, mut, labelled in [(-13, brainrots[2], "None", False),
-                                 (0, brainrots[8], "Rainbow", True),
-                                 (13, brainrots[10], "None", False)]:
-        top = iso.p(cx, 3.5, 0)
-        chars.append((cx + 0, ("belt", top, b, mut, labelled)))
-    # player avatar (in front of conveyor) + rival bot (near player base)
-    chars.append((-22 + 16, ("avatar", iso.p(-22, 0, 16), None, None, True)))
-    chars.append((-26 + 8, ("rival", iso.p(-26, 0, 8), None, None, True)))
-
-    # draw characters back-to-front
+    # --- cast: exactly 4 characters, only 2 labelled ---
+    # (depth, kind, top, brainrot, mutation, labelled)
+    chars = [
+        (-18, "rival", iso.p(-30, 0, 12), None, None, False),
+        (0, "belt", iso.p(0, 3.5, 0), by_id["pot"], "None", True),
+        (12, "belt", iso.p(12, 3.5, 0), by_id["trippi"], None, False),
+        (16, "avatar", iso.p(-4, 0, 20), None, None, True),
+    ]
     chars.sort(key=lambda t: t[0])
-    rarity_by_name = {t["name"]: t for t in rarities}
-    for _, (kind, top, b, mut, labelled) in chars:
+    for _, kind, top, b, mut, labelled in chars:
         if kind == "avatar":
-            hy = draw_character(d, top[0], top[1], 78, (52, 120, 235),
-                                face="happy")
+            hy, crect = draw_character(d, top[0], top[1], 78,
+                                      (52, 120, 235), face="happy")
             draw_label(d, top[0], hy - 6, "YOU", "Player",
-                       (0.3, 0.65, 1.0), "—")
+                       (0.3, 0.65, 1.0), income=None, own=crect)
         elif kind == "rival":
-            hy = draw_character(d, top[0], top[1], 82, (178, 52, 52),
-                                face="determined")
+            hy, crect = draw_character(d, top[0], top[1], 82,
+                                      (178, 52, 52), face="determined",
+                                      pad_top=40)
             # stolen mini brainrot held overhead
-            mini = norm_color(brainrots[0]["color"])
+            mini = norm_color(by_id["tung"]["color"])
             rrect(d, top[0] - 14, hy - 34, top[0] + 14, hy - 8, 5, mini,
                   outline=(255, 255, 255), width=2)
-            draw_label(d, top[0], hy - 40, "RIVAL BOT", "Stealing!",
-                       (1.0, 0.45, 0.45), "—")
         else:
             s = 62 * float(b.get("size", 1))
-            hy = draw_character(d, top[0], top[1], s,
-                                b["color"], mutation=mut, face="happy")
+            hy, crect = draw_character(d, top[0], top[1], s,
+                                      b["color"], mutation=mut, face="happy")
             if not labelled:
                 continue
             inc = int(b["base"] *
@@ -521,18 +571,23 @@ def view_arena(d, spec, brainrots, rarities):
                        "Rainbow": 10, "Bloodrot": 25}[mut or "None"])
             draw_label(d, top[0], hy - 6, b["name"], b["rarity"],
                        rarity_by_name[b["rarity"]]["color"],
-                       f"{inc:,}", mutation=mut)
+                       f"{inc:,}", mutation=mut, own=crect)
 
     hud_top(d, spec.get("cash", "$2,400"), spec.get("income", "$180/s"),
             spec.get("rebirth", "Rebirths: 3"),
             banner=spec.get("banner"), golden=spec.get("golden"))
     controls_hint(d)
+    check_placed()
 
 
 # ---------------- view 2: close-up player base ----------------
 def view_base(d, spec, brainrots, rarities):
     rng = random.Random(23)
-    draw_sky(d, (235, 140, 60), (255, 192, 122), sun_xy=(950, 60))
+    by_id = {b["id"]: b for b in brainrots}
+    rarity_by_name = {t["name"]: t for t in rarities}
+    draw_sky(d, (235, 140, 60), (255, 192, 122), sun_xy=(880, 90), sun_r=38,
+             clouds=[(200, 90, 1.0), (350, 170, 0.75), (1150, 170, 0.7),
+                     (1050, 260, 0.55)])
     draw_ground(d, 330, base=(104, 172, 96), rng=rng)
     fence(d, 40, 330, 1240, 330, posts=16)
     for (tx, ty, s) in ((90, 330, 1.2), (1180, 330, 1.1), (620, 326, 0.9)):
@@ -541,22 +596,40 @@ def view_base(d, spec, brainrots, rarities):
     bush(d, 980, 336, 1.1)
 
     iso = Iso(640, 500, 11.5)
-    # big platform
-    box3d(d, iso, 0, 0, 17, 13, 7, (88, 118, 208))
-    a = iso.p(-17, 7.05, -13)
-    b = iso.p(17, 7.05, -13)
-    c = iso.p(17, 7.05, 13)
-    e = iso.p(-17, 7.05, 13)
+    # platform (wider than before so the three pedestals can spread out)
+    box3d(d, iso, 0, 0, 22, 13, 7, (88, 118, 208))
+    a = iso.p(-22, 7.05, -13)
+    b = iso.p(22, 7.05, -13)
+    c = iso.p(22, 7.05, 13)
+    e = iso.p(-22, 7.05, 13)
     poly(d, [a, b, c, e], (140, 170, 240),
          outline=shade((140, 170, 240), 0.7), width=2)
-    sign = iso.p(0, 7, -12.5)
-    rrect(d, sign[0] - 92, sign[1] - 38, sign[0] + 92, sign[1] - 6, 9,
-          (20, 40, 110), outline=(255, 255, 255), width=2)
-    sf = font(18, bold=True)
-    text(d, sign[0] - text_w("YOUR BASE", sf) / 2, sign[1] - 33,
-         "YOUR BASE", sf, (255, 255, 255))
 
-    # conveyor edge at the front
+    # 3 pedestals in a front row, wide spacing. They sit ON the platform
+    # (y0=7, top 9.5) so the characters stand exactly on them instead of
+    # floating ~30-80 px above the slab, as the old 0..2.5 boxes did.
+    ped_spots = [(-18, 8), (0, 8), (18, 8)]
+    picks = [by_id["giraffa"], by_id["pot"], by_id["sfinge"]]
+    muts = ["None", "Diamond", "Rainbow"]
+    chars = []
+    for (px, pz), b, mut in zip(ped_spots, picks, muts):
+        box3d(d, iso, px, pz, 3.6, 3.0, 9.5, (205, 205, 215), y0=7)
+        top = iso.p(px, 9.5, pz)
+        chars.append((px + pz, top, b, mut))
+    chars.sort(key=lambda t: t[0])
+    for _, top, b, mut in chars:
+        s = 72 * float(b.get("size", 1))
+        hy, crect = draw_character(d, top[0], top[1], s, b["color"],
+                                  mutation=mut, face="happy")
+        # Compact labels (name + rarity only): the full income line made
+        # the pills too wide to keep 20 px apart on one platform. The
+        # mutation still shows as the glow outline on the character.
+        draw_label(d, top[0], hy - 8, b["name"], b["rarity"],
+                   rarity_by_name[b["rarity"]]["color"], income=None,
+                   own=crect)
+
+    # conveyor at the front edge (drawn after the characters: it is in
+    # front of the platform in world space)
     box3d(d, iso, 0, 17, 15, 3.2, 3.5, (74, 78, 92))
     for i in range(-13, 14, 5):
         a = iso.p(i - 1.6, 3.55, 13.8)
@@ -566,37 +639,11 @@ def view_base(d, spec, brainrots, rarities):
         poly(d, [a, b, c, e], (150, 155, 168),
              outline=shade((150, 155, 168), 0.7), width=1)
 
-    # 4 pedestals, 2 rows x 2 columns — wide spacing so the long name
-    # labels never touch each other
-    ped_spots = [(-13, -8), (13, -8),
-                 (-13, 8), (13, 8)]
-    picks = [brainrots[5], brainrots[9],
-             brainrots[11], brainrots[12]]
-    muts = ["Golden", "None", "Diamond", "Rainbow"]
-    rarity_by_name = {t["name"]: t for t in rarities}
-    chars = []
-    for (px, pz), b, mut in zip(ped_spots, picks, muts):
-        box3d(d, iso, px, pz, 3.6, 3.0, 2.5, (205, 205, 215))
-        top = iso.p(px, 9.5, pz)
-        chars.append((px + pz, top, b, mut))
-    # one brainrot on the conveyor being bought
-    chars.append((0 + 17, iso.p(4, 3.5, 17), brainrots[3], "None"))
-    chars.sort(key=lambda t: t[0])
-    for _, top, b, mut in chars:
-        s = 92 * float(b.get("size", 1))
-        hy = draw_character(d, top[0], top[1], s, b["color"],
-                            mutation=mut, face="happy")
-        inc = int(b["base"] *
-                  {"None": 1, "Golden": 2, "Diamond": 5,
-                   "Rainbow": 10, "Bloodrot": 25}[mut or "None"])
-        draw_label(d, top[0], hy - 8, b["name"], b["rarity"],
-                   rarity_by_name[b["rarity"]]["color"],
-                   f"{inc:,}", mutation=mut)
-
     hud_top(d, spec.get("cash", "$7,900"), spec.get("income", "$412/s"),
             spec.get("rebirth", "Rebirths: 5"),
             banner=spec.get("banner"), golden=spec.get("golden"))
     controls_hint(d, "E  Buy this brainrot    ·    Q  Slap the rival    ·    L  Lock Base")
+    check_placed()
 
 
 # ---------------- view 3: HUD + collection / rarity ladder ----------------
@@ -613,9 +660,10 @@ def view_collection(d, spec, brainrots, rarities):
         y = rng.uniform(0, 260)
         r = rng.uniform(1, 2.4)
         ellipse(d, x - r, y - r, x + r, y + r, fill=(255, 255, 255))
-    # moon (kept clear of the top-right HUD buttons)
-    ellipse(d, 1070, 50, 1130, 110, fill=(245, 240, 210))
-    ellipse(d, 1088, 58, 1112, 82, fill=(220, 212, 170))
+    # moon, centred in the free sky above the panel (it used to sit
+    # top-right, hidden behind the HUD buttons)
+    ellipse(d, 610, 40, 670, 100, fill=(245, 240, 210))
+    ellipse(d, 628, 48, 652, 72, fill=(220, 212, 170))
     # ground strip
     rect(d, 0, 600, W, H, (52, 78, 58))
     for _ in range(160):
@@ -625,24 +673,15 @@ def view_collection(d, spec, brainrots, rarities):
         ellipse(d, x - r, y - r * 0.5, x + r, y + r * 0.5,
                 fill=shade((52, 78, 58), rng.choice([0.9, 1.1])))
 
-    # hero characters flanking the panel (fully outside it, never cut off)
     by_id = {b["id"]: b for b in brainrots}
     rarity_by_name = {t["name"]: t for t in rarities}
-    for (hx, b, mut) in ((112, by_id["sfinge"], "Rainbow"),
-                         (1168, by_id["pot"], "Golden")):
-        hy = draw_character(d, hx, 610, 120, b["color"], mutation=mut,
-                            face="happy")
-        inc = int(b["base"] *
-                  {"None": 1, "Golden": 2, "Diamond": 5,
-                   "Rainbow": 10, "Bloodrot": 25}[mut or "None"])
-        draw_label(d, hx, hy - 8, b["name"], b["rarity"],
-                   rarity_by_name[b["rarity"]]["color"], f"{inc:,}",
-                   mutation=mut)
 
-    # collection panel (narrower so the hero characters stay fully visible)
-    px0, py0, px1, py1 = 270, 130, 1010, 660
+    # collection panel. It starts right of the top-left HUD panel (x 340)
+    # so the two panels no longer overlap each other.
+    px0, py0, px1, py1 = 340, 130, 980, 660
     rrect(d, px0, py0, px1, py1, 18, (18, 20, 36),
           outline=(255, 255, 255), width=3)
+    _register("hud", (px0, py0, px1, py1))
     tf = font(26, bold=True)
     text(d, px0 + 28, py0 + 18, "COLLECTION  —  RARITY LADDER", tf,
          (255, 214, 80))
@@ -652,44 +691,70 @@ def view_collection(d, spec, brainrots, rarities):
          sf, (190, 200, 230))
 
     owned = set(spec.get("owned", []))
-    row_h, gap = 58, 8
-    y = py0 + 92
+    row_h, gap = 54, 6
+    y = py0 + 88
     for t in rarities:
         tc = norm_color(t["color"])
         rrect(d, px0 + 20, y, px1 - 20, y + row_h, 12, shade(tc, 0.28),
               outline=tc, width=2)
         # color swatch
-        rrect(d, px0 + 34, y + 12, px0 + 74, y + row_h - 12, 8, tc,
+        rrect(d, px0 + 34, y + 10, px0 + 74, y + row_h - 10, 8, tc,
               outline=(255, 255, 255), width=2)
         nf = font(19, bold=True)
-        text(d, px0 + 88, y + 10, t["name"], nf, (255, 255, 255))
+        text(d, px0 + 88, y + 8, t["name"], nf, (255, 255, 255))
         sf2 = font(14, bold=True)
-        text(d, px0 + 88, y + 34, f"base ${t['baseIncome']:,}/s", sf2,
+        text(d, px0 + 88, y + 30, f"base ${t['baseIncome']:,}/s", sf2,
              (200, 215, 235))
         members = [b for b in brainrots
                    if b["rarity"] == t["name"] and b["id"] in owned]
         if members:
             names = ", ".join(b["name"] for b in members)
-            mf = font(15, bold=True)
-            # owned names end before the checkmark; the check sits clear
-            # to their right so the two never overlap
-            tw = text_w(names, mf)
-            text(d, px1 - 72 - tw, y + 18, names, mf, (140, 255, 160))
-            text(d, px1 - 58, y + 10, "✓", font(20, bold=True),
+            # Shrink the owned-names font until the list clears the tier
+            # name: the Common row has three long names and used to
+            # collide with the tier label. Names stay right-aligned,
+            # ending before the checkmark.
+            min_start = px0 + 88 + text_w(t["name"], nf) + 16
+            mf = None
+            tw = 0
+            for size in (15, 14, 13, 12):
+                cand = font(size, bold=True)
+                w = text_w(names, cand)
+                if px1 - 72 - w >= min_start:
+                    mf, tw = cand, w
+                    break
+            if mf is None:
+                mf = font(12, bold=True)
+                tw = text_w(names, mf)
+            text(d, px1 - 72 - tw, y + 16, names, mf, (140, 255, 160))
+            text(d, px1 - 58, y + 8, "✓", font(20, bold=True),
                  (140, 255, 160))
         else:
             mf = font(15, bold=True)
-            text(d, px1 - 34 - text_w("not owned yet", mf), y + 18,
+            text(d, px1 - 34 - text_w("not owned yet", mf), y + 16,
                  "not owned yet", mf, (150, 155, 175))
         y += row_h + gap
+
+    # hero characters flanking the panel, drawn AFTER it so nothing covers
+    # them. Moved inward and shrunk (s=100) so their labels fit fully on
+    # screen; labels are compact (name + rarity) for the same reason.
+    for (hx, b, mut) in ((160, by_id["sfinge"], "Rainbow"),
+                         (1120, by_id["pot"], "Golden")):
+        hy, crect = draw_character(d, hx, 610, 100, b["color"], mutation=mut,
+                                  face="happy")
+        draw_label(d, hx, hy - 8, b["name"], b["rarity"],
+                   rarity_by_name[b["rarity"]]["color"], income=None,
+                   own=crect)
 
     hud_top(d, spec.get("cash", "$12,300"), spec.get("income", "$1,020/s"),
             spec.get("rebirth", "Rebirths: 7"),
             banner=spec.get("banner"), golden=spec.get("golden"))
+    check_placed()
 
 
 # ---------------- main ----------------
 def main(scene_path, out_path):
+    global PLACED
+    PLACED = []
     with open(scene_path) as f:
         spec = json.load(f)
     brainrots = spec["brainrots"]
