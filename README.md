@@ -1,5 +1,9 @@
 # Brainrot Base Wars
 
+[![make.fun · roblox-brainrot-01](https://make.fun/badge/roblox-brainrot-01.svg)](https://make.fun/bounty/roblox-brainrot-01?utm_source=github&utm_medium=readme&utm_campaign=roblox-brainrot-01)
+[![rank](https://make.fun/badge/roblox-brainrot-01/Plowester1/roblox-brainrot-01-v1/rank.svg)](https://make.fun/bounty/roblox-brainrot-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=roblox-brainrot-01)
+[![reward](https://make.fun/badge/roblox-brainrot-01/Plowester1/roblox-brainrot-01-v1/reward.svg)](https://make.fun/bounty/roblox-brainrot-01?utm_source=github&utm_medium=readme&utm_campaign=roblox-brainrot-01)
+
 A 3D Roblox brainrot game entered in make.fun's **"Make the best AI Roblox brainrot game"**
 bounty (roblox-brainrot-01, FREE entry, $1,000 pot). A Steal-a-Brainrot-style experience:
 you collect absurd meme characters, each earning money every second, and defend your base
